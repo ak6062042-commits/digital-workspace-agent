@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Digital Workspace Agent</title>
+  <style>
+    :root {
+      --bg: #07090c;
+      --card-bg: #11161d;
+      --card-border: #1f2937;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --lime: #d4ff00;
+      --lime-glow: rgba(212, 255, 0, 0.25);
+      --cyan: #38bdf8;
+      --success: #10b981;
+      --warning: #f59e0b;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    body {
+      width: 340px;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 14px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .title {
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: 0.02em;
+    }
+    .title .monogram {
+      color: var(--lime);
+      font-size: 15px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--success);
+      font-weight: 600;
+    }
+    .badge.disconnected {
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--warning);
+    }
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+    .field-label {
+      color: var(--text-muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .field-value {
+      word-break: break-all;
+      font-size: 12px;
+      color: #e5e7eb;
+      max-height: 40px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .btn-ai {
+      width: 100%;
+      background: var(--lime);
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.2s ease;
+      box-shadow: 0 0 12px var(--lime-glow);
+    }
+    .btn-ai:hover {
+      opacity: 0.92;
+      box-shadow: 0 0 18px rgba(212, 255, 0, 0.4);
+    }
+    .btn-ai:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .ai-results-box {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--card-border);
+      display: none;
+    }
+    .category-tag {
+      display: inline-block;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--cyan);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .ai-summary-text {
+      color: #cbd5e1;
+      font-size: 11px;
+      line-height: 1.45;
+      margin-bottom: 8px;
+    }
+    .takeaways-list {
+      list-style-type: disc;
+      padding-left: 16px;
+      color: #94a3b8;
+      font-size: 11px;
+      margin-bottom: 8px;
+    }
+    .takeaways-list li {
+      margin-bottom: 3px;
+    }
+    .btn-task {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.06);
+      color: #f1f5f9;
+      border: 1px solid var(--card-border);
+      border-radius: 5px;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn-task:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: #4b5563;
+    }
+    .btn-sync {
+      width: 100%;
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+    .btn-sync:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+    }
+    .meta-footer {
+      display: flex;
+      justify-content: space-between;
+      color: #6b7280;
+      font-size: 10px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">
+      <span class="monogram">◈</span>
+      <span>WORKSPACE AGENT</span>
+    </div>
+    <div id="status-badge" class="badge">
+      <span class="dot"></span>
+      <span id="status-text">Ready</span>
+    </div>
+  </div>
+
+  <!-- Active Tab Info -->
+  <div class="card">
+    <div class="field-label">Active Browser Tab</div>
+    <div id="tab-title" class="field-value" style="font-weight: 600; margin-bottom: 4px;">Loading...</div>
+    <div id="tab-url" class="field-value" style="color: var(--cyan); font-size: 11px;">Loading...</div>
+  </div>
+
+  <!-- AI Intelligence Box -->
+  <div class="card">
+    <div class="field-label">
+      <span>AI Page Intelligence</span>
+      <span style="color: var(--lime); font-size: 9px; font-weight: 700;">MODEL READY</span>
+    </div>
+
+    <button id="ai-btn" class="btn-ai">
+      <span id="ai-btn-text">✨ Summarize Tab with AI</span>
+    </button>
+
+    <div id="ai-results" class="ai-results-box">
+      <div id="ai-tag" class="category-tag">General Research</div>
+      <div id="ai-summary" class="ai-summary-text">Analyzing page content...</div>
+      <ul id="ai-takeaways" class="takeaways-list"></ul>
+      <button id="add-task-btn" class="btn-task">
+        <span>➕</span>
+        <span id="task-btn-text">Add to Workspace Tasks</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Bottom Sync Control -->
+  <button id="sync-btn" class="btn-sync">
+    <span>⟳ Sync Tab State to Agent</span>
+  </button>
+
+  <div class="meta-footer">
+    <span>Backend: localhost:8000</span>
+    <span id="last-sync">Just now</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

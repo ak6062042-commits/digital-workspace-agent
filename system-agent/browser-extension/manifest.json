@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Digital Workspace Agent — Browser Companion",
+  "version": "1.1.0",
+  "description": "Monitors active browser tab state, extracts semantic context with AI, and synchronizes workspace intelligence with the Digital Workspace Agent backend.",
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "alarms",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Digital Workspace Agent"
+  }
+}

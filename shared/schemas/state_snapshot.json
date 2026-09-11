@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StateSnapshot",
+  "description": "Schema for an OS and browser state snapshot captured by the local agent or browser extension.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": ["integer", "null"],
+      "description": "Unique identifier assigned by the database"
+    },
+    "active_app": {
+      "type": ["string", "null"],
+      "description": "Name of the currently focused application (e.g. Google Chrome, Visual Studio Code)"
+    },
+    "active_window_title": {
+      "type": ["string", "null"],
+      "description": "Title of the currently active window"
+    },
+    "browser_url": {
+      "type": ["string", "null"],
+      "description": "URL of the active browser tab if the active app is a browser"
+    },
+    "browser_tab_title": {
+      "type": ["string", "null"],
+      "description": "Title of the active browser tab if the active app is a browser"
+    },
+    "captured_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when this snapshot was captured"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Optional OS and environment metadata",
+      "properties": {
+        "os_platform": {
+          "type": "string",
+          "description": "OS platform name: darwin, win32, or linux"
+        },
+        "hostname": {
+          "type": "string",
+          "description": "Host machine name"
+        },
+        "idle_seconds": {
+          "type": "number",
+          "description": "User idle time in seconds"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["local-agent", "browser-extension", "manual-seed"],
+          "description": "Origin of this state snapshot"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "required": ["captured_at"],
+  "additionalProperties": false
+}

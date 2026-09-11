@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentRequest",
+  "description": "Standard schema for requests sent to the Coordinator AI agent from the frontend or external clients.",
+  "type": "object",
+  "properties": {
+    "message": {
+      "type": "string",
+      "description": "User prompt or command to be processed"
+    },
+    "session_id": {
+      "type": ["string", "null"],
+      "description": "Conversation or session identifier for context persistence"
+    },
+    "include_state": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether the coordinator should attach the latest OS state snapshot to the context"
+    },
+    "client_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp from the client"
+    }
+  },
+  "required": ["message"],
+  "additionalProperties": false
+}

@@ -6,6 +6,7 @@
   "properties": {
     "message": {
       "type": "string",
+      "maxLength": 4000,
       "description": "User prompt or command to be processed"
     },
     "session_id": {

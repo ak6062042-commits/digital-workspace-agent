@@ -1,181 +1,78 @@
-# Digital Workspace Agent — API Contracts
+# API contracts
 
-This document specifies the REST API contracts between:
-- **Track C (Systems/Integration)**: Local agent & browser extension posting state snapshots.
-- **Track A (AI/Backend)**: Coordinator and sub-agents reading state and managing tasks.
-- **Track B (Frontend/Product)**: React/Vite UI fetching tasks, status, and chatting with the agent.
+Base URL: `http://127.0.0.1:8000`.
 
-Base URL: `http://localhost:8000`
+All `/api/*` requests require:
 
----
+```http
+X-Workspace-Token: <API_TOKEN>
+Content-Type: application/json
+```
 
-## 1. System State Endpoints
+The health endpoint is intentionally the only unauthenticated endpoint.
 
-### `POST /api/snapshot`
-Ingest a workspace state snapshot from the local agent or browser companion.
+## System and state
 
-- **Request Body**: (JSON, conforms to `shared/schemas/state_snapshot.json`)
-  ```json
-  {
-    "active_app": "Google Chrome",
-    "active_window_title": "FastAPI Documentation - Overview",
-    "browser_url": "https://fastapi.tiangolo.com/",
-    "browser_tab_title": "FastAPI Documentation - Overview",
-    "captured_at": "2026-09-11T05:58:14.865986+00:00",
-    "metadata": {
-      "source": "local-agent",
-      "os_platform": "darwin"
-    }
-  }
-  ```
-- **Response**: `201 Created`
-  ```json
-  {
-    "status": "success",
-    "snapshot": {
-      "id": 14,
-      "active_app": "Google Chrome",
-      "active_window_title": "FastAPI Documentation - Overview",
-      "browser_url": "https://fastapi.tiangolo.com/",
-      "browser_tab_title": "FastAPI Documentation - Overview",
-      "captured_at": "2026-09-11T05:58:14.865986"
-    }
-  }
-  ```
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Local service health only. |
+| `POST` | `/api/snapshot` | Ingest bounded, structured metadata from an opted-in watcher/extension. |
+| `GET` | `/api/snapshot/latest` | Latest retained snapshot. |
+| `GET` | `/api/snapshot/diff?limit=5` | Recent workspace changes. |
+| `GET` | `/api/snapshot/history?limit=20` | Retained snapshot history. |
+| `DELETE` | `/api/snapshot/history` | Delete all state history. |
 
----
+`POST /api/snapshot` accepts `active_app`, `active_window_title`, `browser_url`, `browser_tab_title`, and optional `captured_at`. Each field is length bounded and raw screenshots are not accepted.
 
-### `GET /api/snapshot/latest`
-Retrieve the most recent OS/browser state snapshot. Used by the Coordinator to inject real-time context into agent prompts and by the Frontend status bar.
+## Planner and executor
 
-- **Response**: `200 OK`
-  ```json
-  {
-    "id": 14,
-    "active_app": "Google Chrome",
-    "active_window_title": "FastAPI Documentation - Overview",
-    "browser_url": "https://fastapi.tiangolo.com/",
-    "browser_tab_title": "FastAPI Documentation - Overview",
-    "captured_at": "2026-09-11T05:58:14.865986"
-  }
-  ```
-  *(Returns `null` if no snapshot has been captured yet).*
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/chat` | Builds and executes/proposes an execution plan. |
+| `POST` | `/api/actions/{id}/confirm` | Approves or rejects a pending consequential action. |
+| `GET` | `/api/planner/status` | Background planner status. |
+| `GET` | `/api/planner/suggestions` | Non-interrupting task/research proposals. |
+| `POST` | `/api/planner/suggestions/{id}/dismiss` | Dismiss a proposal. |
 
----
+Chat response shape includes a human response, `plan`, execution `status`, optional `confirmation_id`, task updates, browser action data, and current state. A plan contains `intent`, `category`, `action`, `arguments`, `confirmation_required`, and `expected_result`.
 
-### `POST /api/browser/open`
-Launch or navigate the desktop browser to a specific URL.
+## Tasks
 
-- **Request Body**:
-  ```json
-  {
-    "url": "https://www.google.com/search?q=railway+vs+vercel"
-  }
-  ```
-- **Response**: `200 OK`
-  ```json
-  {
-    "status": "success",
-    "url": "https://www.google.com/search?q=railway+vs+vercel"
-  }
-  ```
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/tasks?done=false&task_status=pending` | List tasks. |
+| `POST` | `/api/tasks` | Create a task. |
+| `PATCH` | `/api/tasks/{id}` | Update title/description/due date or `pending`/`ongoing`/`done`. |
 
----
+Creating a task:
 
-## 2. Tasks Endpoints
+```json
+{"title":"Review the architecture", "status":"ongoing"}
+```
 
-### `GET /api/tasks`
-List all workspace tasks.
+## Controlled desktop tools
 
-- **Query Parameters**:
-  - `done` (optional, boolean): Filter by completed status (`true` or `false`).
-- **Response**: `200 OK`
-  ```json
-  [
-    {
-      "id": 1,
-      "title": "Research deployment options",
-      "description": "Compare Vercel vs Railway for frontend/backend hosting",
-      "done": false,
-      "created_at": "2026-09-11T02:48:02.884692",
-      "due_at": null
-    }
-  ]
-  ```
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/apps` | Lists approved app IDs. |
+| `POST` | `/api/os/app` | Opens an app by allowlisted `app_id`. |
+| `POST` | `/api/os/terminal` | Opens the approved terminal only. |
+| `POST` | `/api/browser/open` | Opens a validated HTTP(S) URL. |
+| `POST` | `/api/browser/summarize` | Local, explicit-consent page summary. |
 
----
+`/api/os/app` never accepts executable paths, shell commands, or arbitrary application names.
 
-### `POST /api/tasks`
-Create a new task (called by Task Agent or user via UI).
+## Notifications and writing
 
-- **Request Body**:
-  ```json
-  {
-    "title": "Configure staging database",
-    "description": "Provision PostgreSQL on Railway",
-    "due_at": "2026-09-15T18:00:00Z"
-  }
-  ```
-- **Response**: `201 Created`
-  ```json
-  {
-    "id": 2,
-    "title": "Configure staging database",
-    "description": "Provision PostgreSQL on Railway",
-    "done": false,
-    "created_at": "2026-09-11T06:00:00",
-    "due_at": "2026-09-15T18:00:00"
-  }
-  ```
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` / `GET` | `/api/notifications` | Ingest/list summarized notifications. |
+| `PATCH` / `DELETE` | `/api/notifications/{id}/review` / `{id}` | Mark reviewed/delete. |
+| `POST` / `GET` | `/api/writing/analyze` / `/api/writing/suggestions` | Explicit, local writing assistance/list. |
+| `PATCH` / `DELETE` | `/api/writing/suggestions/{id}/review` / `{id}` | Mark reviewed/delete. |
 
----
+Writing analysis requires `consent: true` and an `operation` of `summarize`, `improve`, `explain`, or `ideas`. It never triggers a web search.
 
-### `PATCH /api/tasks/{task_id}`
-Toggle or update task properties.
+## Settings
 
-- **Request Body**:
-  ```json
-  {
-    "done": true
-  }
-  ```
-- **Response**: `200 OK`
-  ```json
-  {
-    "id": 2,
-    "done": true
-  }
-  ```
-
----
-
-## 3. Coordinator & AI Endpoints
-
-### `POST /api/chat`
-Send user instructions to the coordinator agent.
-
-- **Request Body**: (conforms to `shared/schemas/agent_request.json`)
-  ```json
-  {
-    "message": "What was I working on before this meeting?",
-    "session_id": "session-xyz",
-    "include_state": true
-  }
-  ```
-- **Response**: `200 OK` (conforms to `shared/schemas/agent_response.json`)
-  ```json
-  {
-    "response": "You were reviewing the FastAPI documentation and inspecting your local Docker Compose setup in Terminal.",
-    "routed_agent": "state_agent",
-    "tasks_created": [],
-    "state_snapshot": {
-      "id": 14,
-      "active_app": "Google Chrome",
-      "active_window_title": "FastAPI Documentation - Overview",
-      "browser_url": "https://fastapi.tiangolo.com/",
-      "browser_tab_title": "FastAPI Documentation - Overview",
-      "captured_at": "2026-09-11T05:58:14.865986"
-    },
-    "timestamp": "2026-09-11T06:00:02.123456Z"
-  }
-  ```
+`GET /api/settings` returns non-secret privacy and retention settings. It never returns `API_TOKEN`, database paths, or provider keys.

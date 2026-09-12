@@ -9,15 +9,7 @@ echo "========================================================"
 echo "    Digital Workspace Agent — System Setup Script"
 echo "========================================================"
 
-# 1. Environment Configuration
-if [ ! -f "$PROJECT_ROOT/.env" ]; then
-    echo "[+] Creating .env from .env.example..."
-    cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
-else
-    echo "[*] .env file already exists."
-fi
-
-# 2. Python Virtual Environment Setup
+# 1. Python Virtual Environment Setup
 PYTHON_CMD=""
 if command -v python3 &>/dev/null; then
     PYTHON_CMD="python3"
@@ -39,14 +31,17 @@ fi
 # Source virtualenv
 source "$VENV_DIR/bin/activate"
 
+echo "[+] Creating or validating secure local configuration..."
+python "$PROJECT_ROOT/scripts/bootstrap_config.py"
+
 echo "[+] Upgrading pip and installing Python dependencies..."
 pip install --quiet --upgrade pip
 pip install -r "$PROJECT_ROOT/backend/requirements.txt"
 pip install -r "$PROJECT_ROOT/system-agent/local-agent/requirements.txt"
 
-# 3. Database Initialization & Seeding
-echo "[+] Initializing SQLite database and seeding demo data..."
-python "$PROJECT_ROOT/scripts/seed_data.py"
+# 3. Database Initialization (demo data is intentionally opt-in)
+echo "[+] Initializing database schema..."
+python -c "from backend.db.db import init_db; init_db(); print('Database initialized')"
 
 # 4. Frontend Dependencies (if Node is available and package.json is populated)
 if command -v npm &>/dev/null; then
@@ -71,13 +66,16 @@ echo "To activate your virtual environment:"
 echo "  source .venv/bin/activate"
 echo ""
 echo "To start the backend server:"
-echo "  uvicorn backend.main:app --port 8000 --reload"
+echo "  scripts/run_backend.sh"
 echo ""
 echo "To start the OS local state watcher:"
 echo "  python system-agent/local-agent/watcher.py"
 echo ""
 echo "To run the React frontend:"
-echo "  cd frontend && npm run dev"
+echo "  scripts/run_frontend.sh"
+echo ""
+echo "To run tests:"
+echo "  scripts/test.sh"
 echo ""
 echo "To load the Chrome extension companion:"
 echo "  Load unpacked folder: system-agent/browser-extension in chrome://extensions"

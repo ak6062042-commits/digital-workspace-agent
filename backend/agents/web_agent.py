@@ -52,13 +52,13 @@ class WebResearchAgent:
         cleaned = re.sub(r"(?i)^(search for|search|find|look up)\s+", "", cleaned).strip()
         return cleaned if len(cleaned) > 2 else query
 
-    def handle(self, query: str) -> Dict[str, Any]:
+    def handle(self, query: str, launch_browser: bool = False) -> Dict[str, Any]:
         """
         Execute research in chat. If asked to search on the browser, also physically launch desktop browser.
         """
         logger.info("Web research initiated for query: '%s'", query)
 
-        should_launch = self._should_launch_browser(query)
+        should_launch = launch_browser
         clean_query = self._clean_search_query(query)
 
         # 1. Launch desktop browser if requested to search on browser

@@ -10,7 +10,7 @@
     },
     "routed_agent": {
       "type": "string",
-      "enum": ["task_agent", "state_agent", "web_agent", "coordinator"],
+      "enum": ["task", "state", "web", "desktop", "help", "conversation", "coordinator"],
       "description": "The specialized agent that handled or routed this request"
     },
     "tasks_created": {
@@ -45,6 +45,19 @@
       "type": "string",
       "format": "date-time",
       "description": "Response generation timestamp"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["executed", "confirmation_required", "rejected", "not_found"],
+      "description": "Whether the plan ran or needs a user decision"
+    },
+    "confirmation_id": {
+      "type": ["string", "null"],
+      "description": "Identifier used to approve or reject a consequential plan"
+    },
+    "plan": {
+      "type": "object",
+      "description": "Deterministic execution plan produced before tool use"
     }
   },
   "required": ["response", "routed_agent", "timestamp"],

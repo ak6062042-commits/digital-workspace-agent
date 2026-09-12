@@ -5,14 +5,14 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 from backend.db.db import get_session
-from backend.db.models import StateSnapshot, Task
+from backend.db.models import StateSnapshot
 
 logger = logging.getLogger("PlannerScheduler")
 
 TICK_INTERVAL = 15                # seconds between planner checks
 IDLE_SUGGESTION_THRESHOLD = 90     # seconds unchanged before suggesting related docs
 MIN_ACTIVE_DURATION = 120          # must be focused this long before it "counts"
-ABANDON_THRESHOLD = 300            # seconds backgrounded before auto-task
+ABANDON_THRESHOLD = 300            # seconds backgrounded before a task proposal
 WEB_AGENT_COOLDOWN = 600           # don't re-suggest for same context sooner than this
 
 # Apps/domains we treat as "reading or writing" contexts worth suggesting research for
@@ -110,16 +110,16 @@ class PlannerScheduler:
                 self._contexts[key]["left_at"] = None  # resumed
             self._current_key = key
 
-        # --- Rule 2: abandoned tab/app -> auto task (checked first, it's cheap) ---
+        # --- Rule 2: abandoned tab/app -> task proposal (never auto-create) ---
         for ctx_key, ctx in list(self._contexts.items()):
             if ctx["task_created"] or ctx["left_at"] is None:
                 continue
             was_active_long_enough = (ctx["left_at"] - ctx["started_at"]) >= MIN_ACTIVE_DURATION
             been_gone_long_enough = (now - ctx["left_at"]) >= ABANDON_THRESHOLD
             if was_active_long_enough and been_gone_long_enough:
-                self._create_abandoned_task(ctx)
+                self._propose_abandoned_task(ctx)
                 ctx["task_created"] = True
-                self._set_decision(f"created_task_for:{ctx['title']}")
+                self._set_decision(f"proposed_task_for:{ctx['title']}")
                 return  # one action per tick
 
         # --- Rule 1: idle on same doc-like context -> web suggestion ---
@@ -154,34 +154,34 @@ class PlannerScheduler:
         ])).lower()
         return any(kw in haystack for kw in DOC_HINT_KEYWORDS) or bool(snapshot.browser_url)
 
-    def _create_abandoned_task(self, ctx: Dict[str, Any]):
-        with get_session() as session:
-            task = Task(
-                title=f"Follow up: {ctx['title'] or ctx['app'] or 'Unfinished work'}",
-                description=f"Auto-flagged: left unattended after being active. App: {ctx['app']}, URL: {ctx.get('url')}",
-                done=False,
-            )
-            session.add(task)
-            session.commit()
-        logger.info("Auto-created task for abandoned context: %s", ctx["title"])
+    def _propose_abandoned_task(self, ctx: Dict[str, Any]):
+        self._suggestion_seq += 1
+        self._suggestions.append({
+            "id": self._suggestion_seq,
+            "kind": "task_proposal",
+            "context": ctx["title"] or ctx["app"] or "Unfinished work",
+            "response": "This context was left after sustained activity. Add a follow-up task only if it is still relevant.",
+            "proposed_task": {"title": f"Follow up: {ctx['title'] or ctx['app'] or 'Unfinished work'}"},
+            "created_at": datetime.utcnow().isoformat(),
+            "dismissed": False,
+        })
+        logger.info("Proposed task for unattended context: %s", ctx["title"])
 
     def _trigger_web_suggestion(self, snapshot: StateSnapshot):
         query_text = snapshot.browser_tab_title or snapshot.active_window_title or snapshot.active_app
         if not query_text:
             return
-        try:
-            result = self.coordinator.web_agent.handle(f"related resources for {query_text}")
-            self._suggestion_seq += 1
-            self._suggestions.append({
-                "id": self._suggestion_seq,
-                "context": query_text,
-                "response": result.get("response", ""),
-                "browser_info": result.get("browser_info"),
-                "created_at": datetime.utcnow().isoformat(),
-                "dismissed": False,
-            })
-        except Exception:
-            logger.exception("Web suggestion trigger failed")
+        # Do not send window titles, URLs, or document context to a search provider automatically.
+        # The UI presents this as a local suggestion; a user can then explicitly request research.
+        self._suggestion_seq += 1
+        self._suggestions.append({
+            "id": self._suggestion_seq,
+            "kind": "research_proposal",
+            "context": query_text,
+            "response": "You have been focused here for a while. Ask for research if related sources would be useful.",
+            "created_at": datetime.utcnow().isoformat(),
+            "dismissed": False,
+        })
 
     def _set_decision(self, decision: str):
         self._last_decision = decision

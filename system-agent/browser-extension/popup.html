@@ -222,6 +222,16 @@
     <div id="tab-url" class="field-value" style="color: var(--cyan); font-size: 11px;">Loading...</div>
   </div>
 
+  <div class="card">
+    <div class="field-label">Privacy & Connection</div>
+    <input id="api-token" type="password" placeholder="Local API token" style="width:100%; margin-bottom:8px; padding:6px; background:#111827; color:#e5e7eb; border:1px solid #374151; border-radius:4px;" />
+    <label style="display:flex; gap:7px; align-items:center; color:#cbd5e1;">
+      <input id="state-sync-enabled" type="checkbox" /> Sync active-tab metadata
+    </label>
+    <div style="font-size:10px; color:#94a3b8; margin-top:6px;">Typing is never captured. Page and selected-text analysis only run after a click.</div>
+    <button id="save-settings-btn" class="btn-sync" style="margin-top:8px;">Save privacy settings</button>
+  </div>
+
   <!-- AI Intelligence Box -->
   <div class="card">
     <div class="field-label">
@@ -240,6 +250,9 @@
       <button id="add-task-btn" class="btn-task">
         <span>➕</span>
         <span id="task-btn-text">Add to Workspace Tasks</span>
+      </button>
+      <button id="selection-btn" class="btn-task" style="margin-top:6px;">
+        <span>✦</span><span>Analyze selected text</span>
       </button>
     </div>
   </div>

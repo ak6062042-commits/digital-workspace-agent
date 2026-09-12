@@ -53,6 +53,7 @@ class TaskAgent:
                 task = session.query(Task).filter(Task.id == task_id).first()
                 if task:
                     task.done = True
+                    task.status = "done"
                     session.commit()
                     session.refresh(task)
                     tasks_modified.append(task.to_dict())
@@ -105,22 +106,43 @@ class TaskAgent:
 
         due_date = self._extract_due_date(query)
 
-        with get_session() as session:
-            new_task = Task(
-                title=title,
-                description=f"Generated via Workspace Coordinator on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
-                done=False,
-                due_at=due_date
-            )
-            session.add(new_task)
-            session.commit()
-            session.refresh(new_task)
-            tasks_created.append(new_task.to_dict())
+        created = self.create_task(title, due_date=due_date)
+        new_task = created["task"]
+        tasks_created.append(new_task)
 
         due_str = f" with due date **{due_date.strftime('%A, %b %d')}**" if due_date else ""
         return {
             "agent": "task_agent",
-            "response": f"Created new task #{new_task.id}: **{new_task.title}**{due_str}.",
+            "response": f"Created new task #{new_task['id']}: **{new_task['title']}**{due_str}.",
             "tasks_created": tasks_created,
             "tasks_modified": []
         }
+
+    def create_task(self, title: str, description: Optional[str] = None, due_date: Optional[datetime] = None) -> Dict[str, Any]:
+        clean_title = title.strip()[:255]
+        if not clean_title:
+            return {"response": "A task needs a title.", "tasks_created": [], "tasks_modified": []}
+        with get_session() as session:
+            new_task = Task(
+                title=clean_title,
+                description=description or f"Created by Workspace Assistant on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+                done=False,
+                status="pending",
+                due_at=due_date,
+            )
+            session.add(new_task)
+            session.commit()
+            session.refresh(new_task)
+            task = new_task.to_dict()
+        return {"agent": "task_agent", "response": f"Created task #{task['id']}: **{task['title']}**.", "task": task, "tasks_created": [task], "tasks_modified": []}
+
+    def complete_task(self, task_id: int) -> Dict[str, Any]:
+        with get_session() as session:
+            task = session.query(Task).filter(Task.id == task_id).first()
+            if not task:
+                return {"agent": "task_agent", "response": f"Could not find task #{task_id}.", "tasks_created": [], "tasks_modified": []}
+            task.done, task.status = True, "done"
+            session.commit()
+            session.refresh(task)
+            updated = task.to_dict()
+        return {"agent": "task_agent", "response": f"Marked task #{task_id} as done.", "tasks_created": [], "tasks_modified": [updated]}

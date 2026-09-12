@@ -21,18 +21,22 @@ if PROJECT_ROOT not in sys.path:
 try:
     from config import (
         BACKEND_API_URL,
+        API_TOKEN,
         POLL_INTERVAL,
         FORCE_HEARTBEAT_INTERVAL,
         DIRECT_DB_FALLBACK,
+        CAPTURE_ENABLED,
         LOG_LEVEL,
     )
     from snapshot import capture_snapshot
 except ImportError:
     from .config import (
         BACKEND_API_URL,
+        API_TOKEN,
         POLL_INTERVAL,
         FORCE_HEARTBEAT_INTERVAL,
         DIRECT_DB_FALLBACK,
+        CAPTURE_ENABLED,
         LOG_LEVEL,
     )
     from .snapshot import capture_snapshot
@@ -89,7 +93,10 @@ def post_snapshot(snapshot: Dict[str, Any], backend_url: str = BACKEND_API_URL) 
         return False
 
     try:
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "X-Workspace-Token": API_TOKEN}
+        if not API_TOKEN:
+            logger.error("API_TOKEN is not configured; refusing to send workspace metadata over HTTP.")
+            return save_to_database_directly(snapshot) if DIRECT_DB_FALLBACK else False
         response = requests.post(backend_url, json=snapshot, headers=headers, timeout=2.5)
         if response.status_code in (200, 201):
             logger.info("Successfully posted snapshot to backend: %s", response.status_code)
@@ -126,6 +133,9 @@ def run_watcher(
     dry_run: bool = False,
 ):
     """Main watcher loop."""
+    if not CAPTURE_ENABLED and not dry_run:
+        logger.warning("CAPTURE_ENABLED is false. No workspace metadata will be collected. Set it to true only after reviewing the privacy settings.")
+        return
     logger.info("Starting Local Agent Watcher...")
     logger.info("Backend URL: %s | Poll Interval: %ss | Dry-run: %s", backend_url, interval, dry_run)
 

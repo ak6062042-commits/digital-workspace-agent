@@ -46,20 +46,16 @@ function playChime(type = 'wake') {
 
 const WAKE_PHRASES = [
   "hey agent",
-  "a agent",
-  "hey urgent",
-  "hey engine",
   "hi agent",
-  "high agent",
   "agent,"
 ];
 
 export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onToggleVoice }) {
   const [input, setInput] = useState('');
-  // Always-On Voice is enabled by default
-  const [isVoiceActive, setIsVoiceActive] = useState(true);
+  // Microphone capture is opt-in and remains visibly paused until enabled.
+  const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [isAwake, setIsAwake] = useState(false);
-  const [voiceStatus, setVoiceStatus] = useState('🟢 Always-On Voice Active: Say "Hey Agent"...');
+  const [voiceStatus, setVoiceStatus] = useState('Voice recognition paused. Click the microphone to enable it.');
   const [autoCountdown, setAutoCountdown] = useState(null);
 
   const messagesEndRef = useRef(null);
@@ -261,24 +257,7 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
 
     recognitionRef.current = recognizer;
 
-    // Start recognition immediately
-    try {
-      recognizer.start();
-      isListeningRef.current = true;
-    } catch (e) {
-      // Browser may require an initial user gesture
-      const startOnGesture = () => {
-        try {
-          recognizer.start();
-          isListeningRef.current = true;
-          setIsVoiceActive(true);
-        } catch (err) {}
-        window.removeEventListener('click', startOnGesture);
-        window.removeEventListener('keydown', startOnGesture);
-      };
-      window.addEventListener('click', startOnGesture, { once: true });
-      window.addEventListener('keydown', startOnGesture, { once: true });
-    }
+    // Do not start recognition here. The microphone control is the explicit consent boundary.
 
     return () => {
       isListeningRef.current = false;

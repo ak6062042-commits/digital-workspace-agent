@@ -3,7 +3,7 @@ import { Bot, User, Check, Copy, CheckSquare, Globe, ExternalLink, Zap, Volume2 
 import { marked } from 'marked';
 import { openBrowserUrl } from '../api/client';
 
-// Configure marked to render safe links and GFM breaks
+// Raw HTML and unsafe URL schemes are discarded before React receives markup.
 marked.setOptions({
   gfm: true,
   breaks: true,
@@ -11,8 +11,10 @@ marked.setOptions({
 
 const renderer = new marked.Renderer();
 renderer.link = ({ href, text }) => {
+  if (!/^https?:\/\//i.test(href || '')) return `<span>${text}</span>`;
   return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
+renderer.html = () => '';
 marked.use({ renderer });
 
 export function MessageBubble({ message }) {

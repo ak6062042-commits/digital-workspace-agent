@@ -1,98 +1,35 @@
-// Digital Workspace Agent - API Client
-
 const API_BASE = '/api';
+const token = import.meta.env.VITE_API_TOKEN || '';
 
-export async function sendMessage(message, sessionId = 'default_session', includeState = true) {
-  const response = await fetch(`${API_BASE}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message,
-      session_id: sessionId,
-      include_state: includeState
-    })
+async function request(path, options = {}) {
+  if (!token) throw new Error('VITE_API_TOKEN is not configured. Run the setup script and restart Vite.');
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', 'X-Workspace-Token': token, ...(options.headers || {}) },
   });
   if (!response.ok) {
-    throw new Error(`Chat request failed with HTTP ${response.status}`);
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || `Request failed with HTTP ${response.status}`);
   }
-  return await response.json();
+  return response.status === 204 ? null : response.json();
 }
 
-export async function fetchTasks(done = null) {
-  let url = `${API_BASE}/tasks`;
-  if (done !== null) {
-    url += `?done=${done}`;
-  }
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch tasks: ${response.status}`);
-  }
-  return await response.json();
-}
-
-export async function createTask(title, description = null, dueAt = null) {
-  const response = await fetch(`${API_BASE}/tasks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      title,
-      description,
-      due_at: dueAt
-    })
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to create task: ${response.status}`);
-  }
-  return await response.json();
-}
-
-export async function toggleTask(taskId, done) {
-  const response = await fetch(`${API_BASE}/tasks/${taskId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ done })
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to update task: ${response.status}`);
-  }
-  return await response.json();
-}
-
-export async function fetchLatestSnapshot() {
-  const response = await fetch(`${API_BASE}/snapshot/latest`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch latest snapshot: ${response.status}`);
-  }
-  return await response.json();
-}
-
-export async function fetchSnapshotDiff(limit = 5) {
-  const response = await fetch(`${API_BASE}/snapshot/diff?limit=${limit}`);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch snapshot diff: ${response.status}`);
-  }
-  return await response.json();
-}
-
-export async function reseedDemoData() {
-  const response = await fetch(`${API_BASE}/demo/seed`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' }
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to reseed demo data: ${response.status}`);
-  }
-  return await response.json();
-}
-
-export async function openBrowserUrl(url) {
-  const response = await fetch(`${API_BASE}/browser/open`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url })
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to open URL: ${response.status}`);
-  }
-  return await response.json();
-}
+export const sendMessage = (message, session_id = 'default_session', include_state = true) => request('/chat', { method: 'POST', body: JSON.stringify({ message, session_id, include_state }) });
+export const confirmAction = (id, approved) => request(`/actions/${id}/confirm`, { method: 'POST', body: JSON.stringify({ approved }) });
+export const fetchTasks = (done = null) => request(`/tasks${done === null ? '' : `?done=${done}`}`);
+export const createTask = (title, description = null, due_at = null, status = 'pending') => request('/tasks', { method: 'POST', body: JSON.stringify({ title, description, due_at, status }) });
+export const updateTask = (id, update) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(update) });
+export const toggleTask = (id, done) => updateTask(id, { done });
+export const fetchLatestSnapshot = () => request('/snapshot/latest');
+export const fetchSnapshotDiff = (limit = 5) => request(`/snapshot/diff?limit=${limit}`);
+export const openBrowserUrl = (url) => request('/browser/open', { method: 'POST', body: JSON.stringify({ url }) });
+export const fetchNotifications = (reviewed = null) => request(`/notifications${reviewed === null ? '' : `?reviewed=${reviewed}`}`);
+export const reviewNotification = (id) => request(`/notifications/${id}/review`, { method: 'PATCH' });
+export const deleteNotification = (id) => request(`/notifications/${id}`, { method: 'DELETE' });
+export const fetchWritingSuggestions = (reviewed = null) => request(`/writing/suggestions${reviewed === null ? '' : `?reviewed=${reviewed}`}`);
+export const analyzeWriting = (text, operation = 'summarize') => request('/writing/analyze', { method: 'POST', body: JSON.stringify({ text, operation, consent: true }) });
+export const reviewWritingSuggestion = (id) => request(`/writing/suggestions/${id}/review`, { method: 'PATCH' });
+export const fetchPlannerStatus = () => request('/planner/status');
+export const fetchPlannerSuggestions = () => request('/planner/suggestions');
+export const dismissPlannerSuggestion = (id) => request(`/planner/suggestions/${id}/dismiss`, { method: 'POST' });
+export const fetchSettings = () => request('/settings');

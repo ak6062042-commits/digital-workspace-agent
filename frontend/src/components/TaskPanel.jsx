@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { SlidersHorizontal, Plus, Calendar, CheckCircle2 } from 'lucide-react';
 
-export function TaskPanel({ tasks, onToggleTask, onCreateTask }) {
+export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask }) {
   const [filter, setFilter] = useState('active'); // 'all' | 'active' | 'completed'
   const [newTitle, setNewTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -116,6 +116,18 @@ export function TaskPanel({ tasks, onToggleTask, onCreateTask }) {
                     <Calendar size={10} />
                     <span>Due {new Date(task.due_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
                   </div>
+                )}
+                {!task.done && (
+                  <select
+                    value={task.status || 'pending'}
+                    onChange={(event) => onSetTaskStatus(task.id, event.target.value)}
+                    className="input-hf"
+                    aria-label={`Status for ${task.title}`}
+                    style={{ marginTop: '5px', fontSize: '10px', border: '1px solid var(--hf-border-subtle)', padding: '2px 5px' }}
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="ongoing">Ongoing</option>
+                  </select>
                 )}
               </div>
             </div>

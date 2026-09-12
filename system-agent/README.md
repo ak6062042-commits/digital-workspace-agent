@@ -1,95 +1,34 @@
-# System Agent & Browser Extension (Track C)
+# System agent and browser companion
 
-This component provides real-time workspace context to the **Digital Workspace Agent** by continuously capturing and synchronizing operating system state (active application, active window title) and browser state (active tab title, URL) into the backend database.
+## Local state watcher
 
----
+`local-agent/watcher.py` collects only active application, window title, and—where a supported platform adapter exposes it—browser URL/title. It does not capture screenshots, clipboard data, or keystrokes.
 
-## Directory Structure
+It is disabled by default. To use it:
 
-```
-system-agent/
-├── local-agent/
-│   ├── config.py         # Polling interval, backend URL, and platform detection
-│   ├── snapshot.py       # Cross-platform window & browser state extraction
-│   ├── watcher.py        # Background polling daemon & change detector
-│   └── requirements.txt  # Python dependencies (requests, psutil)
-└── browser-extension/
-    ├── manifest.json     # Chrome Manifest V3 configuration
-    ├── background.js     # Tab change listener & sync service worker
-    ├── popup.html        # Status popup UI
-    └── popup.js          # Popup controller & manual sync trigger
-```
+1. Run `scripts/setup.*` to create `.env` and the API token.
+2. Set `CAPTURE_ENABLED=true` in `.env` after reviewing the privacy implications.
+3. Run `python system-agent/local-agent/watcher.py` from the activated virtual environment.
 
----
+The watcher sends `X-Workspace-Token` to the local API. If the backend is unavailable, its direct SQLite fallback remains local to the project database.
 
-## 1. Local Agent Setup & Usage
+Platform support:
 
-### Prerequisites
-- Python 3.10+
-- Installed dependencies:
-  ```bash
-  pip install -r system-agent/local-agent/requirements.txt
-  ```
+- macOS: active app/window; active tab URL/title requires the OS Automation permission.
+- Windows: active foreground application and window title.
+- Linux/X11: active window metadata through `xdotool`.
 
-### Quick Run: Single Snapshot
-Capture and inspect the current OS and window state without running a daemon:
-```bash
-python system-agent/local-agent/snapshot.py
-```
+## Browser extension
 
-Sample output:
-```json
-{
-  "active_app": "Electron",
-  "active_window_title": "digital-workspace-agent — Code Editor",
-  "browser_url": null,
-  "browser_tab_title": null,
-  "captured_at": "2026-09-11T05:58:14.865986+00:00",
-  "metadata": {
-    "os_platform": "darwin",
-    "hostname": "macbook-m1",
-    "source": "local-agent"
-  }
-}
-```
+Load `browser-extension` unpacked in a Chromium browser. The extension:
 
-### Running the Continuous Watcher Daemon
-Start the watcher daemon to continuously detect window/app changes and stream them to the backend:
-```bash
-python system-agent/local-agent/watcher.py
-```
+- has no content script and does not observe text input;
+- requires a user-provided local API token in its popup;
+- optionally synchronizes active-tab metadata after the user enables that setting;
+- summarizes a page or analyzes selected text only after a user click.
 
-#### CLI Options
-- `--once`: Capture a single snapshot, submit it, and exit.
-- `--dry-run`: Print captured snapshot to stdout without sending to backend or saving.
-- `--interval <seconds>`: Set polling interval (default: `3.0` seconds).
-- `--backend-url <url>`: Override backend snapshot endpoint (default: `http://localhost:8000/api/snapshot`).
+The extension has access to the active tab only for these explicit interactions. Do not enable state sync on a browser profile that contains workspaces you do not intend to store locally.
 
-#### Offline & Direct-to-Database Fallback
-If the backend HTTP server (`uvicorn backend.main:app`) is not running, the watcher automatically falls back to writing directly into `backend/db/app.db` using SQLAlchemy, ensuring you can test local state tracking immediately.
+## Floating widget
 
----
-
-## 2. macOS Permissions (Accessibility & Automation)
-
-On macOS, `snapshot.py` uses native AppleScript (`osascript`) to inspect the frontmost application and active browser tabs (Google Chrome, Safari, Brave, Arc, Edge).
-
-1. **System Events Permission**: On first run, macOS may prompt to allow `osascript` / your terminal or IDE to control "System Events". Click **Allow**.
-2. **Browser Automation Permission**: To read active tab URLs from Chrome/Safari, macOS may ask for permission to control that browser. Click **OK**.
-3. If permissions were previously denied, verify in:
-   `System Settings` → `Privacy & Security` → `Automation` & `Accessibility`.
-
----
-
-## 3. Browser Extension Setup (Chrome / Brave / Edge / Arc)
-
-The browser extension complements the OS agent by providing real-time tab change updates even when the browser is running across multiple displays or virtual workspaces.
-
-### Installation Steps
-1. Open your Chromium-based browser and navigate to `chrome://extensions` (or `brave://extensions`, `edge://extensions`).
-2. Enable **Developer mode** (toggle in the top-right corner).
-3. Click **Load unpacked**.
-4. Select the directory:
-   `<project_root>/system-agent/browser-extension`
-5. The **Digital Workspace Agent — Browser Companion** icon will appear in your extension toolbar.
-6. Click the extension icon to view the active tab, connection status to `http://localhost:8000`, and trigger a manual sync.
+`floating-widget/widget.py` is an optional PyQt tray-like interface. Run it in an environment with `PyQt5` installed and `API_TOKEN` available. It is a client of the same authenticated API and does not create independent automation rules.

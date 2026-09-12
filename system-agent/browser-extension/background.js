@@ -1,187 +1,83 @@
-// Digital Workspace Agent - Chrome Extension Background Service Worker (MV3)
+// Privacy-first MV3 companion. It never records typing or page content in the background.
+const API_BASE = "http://localhost:8000/api";
 
-const BACKEND_SNAPSHOT_URL = "http://localhost:8000/api/snapshot";
-const BACKEND_SUMMARIZE_URL = "http://localhost:8000/api/browser/summarize";
-const BACKEND_WRITING_URL = "http://localhost:8000/api/writing/analyze";
-const WRITING_COOLDOWN_MS = 90000; // one analysis per tab per 90 seconds max
+async function getConfig() {
+  const stored = await chrome.storage.local.get(["apiToken", "stateSyncEnabled"]);
+  return { apiToken: stored.apiToken || "", stateSyncEnabled: stored.stateSyncEnabled === true };
+}
 
-let lastWritingAnalysisAt = {};
-let debounceTimer = null;
-let lastPostedUrl = null;
+async function apiFetch(path, options = {}) {
+  const { apiToken } = await getConfig();
+  if (!apiToken) throw new Error("Set your local API token in the extension first.");
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", "X-Workspace-Token": apiToken, ...(options.headers || {}) }
+  });
+  if (!response.ok) throw new Error(`Backend returned ${response.status}`);
+  return response.json();
+}
 
-// Helper to send snapshot to backend
 async function sendSnapshot(tab) {
-  if (!tab || !tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("edge://") || tab.url.startsWith("about:")) {
-    return;
-  }
-
-  const payload = {
-    active_app: "Google Chrome",
-    active_window_title: tab.title || "Browser Window",
-    browser_url: tab.url,
-    browser_tab_title: tab.title || "Untitled Tab",
-    captured_at: new Date().toISOString(),
-    metadata: {
-      source: "browser-extension",
-      tab_id: tab.id,
-      window_id: tab.windowId
-    }
-  };
-
-  try {
-    const response = await fetch(BACKEND_SNAPSHOT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (response.ok) {
-      lastPostedUrl = tab.url;
-      await chrome.storage.local.set({
-        lastSync: new Date().toISOString(),
-        status: "connected",
-        activeTab: { title: tab.title, url: tab.url }
-      });
-      console.log("[WorkspaceExtension] Snapshot synced:", tab.url);
-    } else {
-      console.warn("[WorkspaceExtension] Backend returned status:", response.status);
-      await chrome.storage.local.set({ status: "backend_error" });
-    }
-  } catch (err) {
-    console.info("[WorkspaceExtension] Backend unreachable:", err.message);
-    await chrome.storage.local.set({
-      status: "disconnected",
-      activeTab: { title: tab.title, url: tab.url }
-    });
-  }
+  const { stateSyncEnabled } = await getConfig();
+  if (!stateSyncEnabled || !tab?.url || /^(chrome|edge|about):/.test(tab.url)) return;
+  await apiFetch("/snapshot", {
+    method: "POST",
+    body: JSON.stringify({
+      active_app: "Google Chrome", active_window_title: tab.title || "Browser Window",
+      browser_url: tab.url, browser_tab_title: tab.title || "Untitled Tab",
+      captured_at: new Date().toISOString(), metadata: { source: "browser-extension" }
+    })
+  });
+  await chrome.storage.local.set({ lastSync: new Date().toISOString(), status: "connected", activeTab: { title: tab.title, url: tab.url } });
 }
 
-// Debounce state push
-function handleTabChange(tabId) {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    try {
-      const tab = await chrome.tabs.get(tabId);
-      if (tab && tab.url && tab.url !== lastPostedUrl) {
-        await sendSnapshot(tab);
-      }
-    } catch (e) {
-      // Tab might have closed
-    }
-  }, 1200);
-}
-
-// Listen for tab activation (switch tab)
-chrome.tabs.onActivated.addListener((activeInfo) => {
-  handleTabChange(activeInfo.tabId);
+// State metadata sync is explicitly enabled in the popup. No content is captured here.
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+  try { await sendSnapshot(await chrome.tabs.get(tabId)); } catch { await chrome.storage.local.set({ status: "disconnected" }); }
 });
-
-// Listen for tab updates (URL change / finished loading)
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete" && tab.active) {
-    handleTabChange(tabId);
+    try { await sendSnapshot(tab); } catch { await chrome.storage.local.set({ status: "disconnected" }); }
   }
 });
 
-// Message listener from popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  // Action 4 Writing Activity
-  if (request.action === "writing_activity") {
-    const tabId = sender.tab ? sender.tab.id : "unknown";
-    const now = Date.now();
-    const last = lastWritingAnalysisAt[tabId] || 0;
-    if (now - last < WRITING_COOLDOWN_MS) {
-      return false; // still on cooldown, skip silently
-    }
-    lastWritingAnalysisAt[tabId] = now;
+function extractPageContent() {
+  const clone = document.body?.cloneNode(true);
+  if (!clone) return { title: document.title, url: location.href, content: "" };
+  clone.querySelectorAll("script,style,noscript,iframe,svg,nav,header,footer,aside").forEach((node) => node.remove());
+  const main = clone.querySelector("main,article") || clone;
+  return { title: document.title, url: location.href, content: (main.innerText || "").replace(/\s+/g, " ").trim().slice(0, 4000) };
+}
+function extractSelection() {
+  return { title: document.title, url: location.href, text: String(window.getSelection?.() || "").trim().slice(0, 2000) };
+}
 
-    fetch(BACKEND_WRITING_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: request.url,
-        title: request.title,
-        text: request.text
-      })
-    }).catch(err => {
-      console.info("[WorkspaceExtension] Writing analysis unreachable:", err.message);
-    });
-
-    return false;
-  }
-
-  // Action 1: Manual Tab Sync
-  if (request.action === "sync_now") {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (tabs.length > 0) {
-        await sendSnapshot(tabs[0]);
-        sendResponse({ success: true, tab: tabs[0] });
-      } else {
-        sendResponse({ success: false, error: "No active tab found" });
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  (async () => {
+    try {
+      if (request.action === "save_settings") {
+        await chrome.storage.local.set({ apiToken: request.apiToken || "", stateSyncEnabled: request.stateSyncEnabled === true });
+        sendResponse({ success: true }); return;
       }
-    });
-    return true;
-  }
-
-  // Action 2: AI Page Summarization
-  if (request.action === "summarize_active_tab") {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (!tabs || tabs.length === 0) {
-        sendResponse({ success: false, error: "No active tab found" });
-        return;
+      if (request.action === "sync_now") {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await sendSnapshot(tab); sendResponse({ success: true, tab }); return;
       }
-      const activeTab = tabs[0];
-
-      try {
-        // Request extracted content from content script
-        let pageData = null;
-        try {
-          pageData = await chrome.tabs.sendMessage(activeTab.id, { action: "extract_page_content" });
-        } catch (scriptErr) {
-          // Fallback: execute script dynamically if tab was opened before extension load
-          const injection = await chrome.scripting.executeScript({
-            target: { tabId: activeTab.id },
-            func: () => {
-              const clone = document.body ? document.body.cloneNode(true) : null;
-              if (clone) {
-                ["script", "style", "noscript", "nav", "footer"].forEach(s => {
-                  clone.querySelectorAll(s).forEach(e => e.remove());
-                });
-                return clone.innerText.slice(0, 3000);
-              }
-              return "";
-            }
-          });
-          pageData = {
-            title: activeTab.title,
-            url: activeTab.url,
-            content: (injection && injection[0] && injection[0].result) || ""
-          };
-        }
-
-        // Post to backend AI summarizer
-        const res = await fetch(BACKEND_SUMMARIZE_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: activeTab.url,
-            title: activeTab.title,
-            content: pageData ? pageData.content : ""
-          })
-        });
-
-        if (!res.ok) {
-          throw new Error(`AI Backend returned ${res.status}`);
-        }
-
-        const summaryResult = await res.json();
-        await chrome.storage.local.set({ lastSummary: summaryResult });
-        sendResponse({ success: true, data: summaryResult });
-      } catch (err) {
-        console.error("[WorkspaceExtension] Summarize failed:", err);
-        sendResponse({ success: false, error: err.message });
+      if (request.action === "summarize_active_tab") {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [{ result: page }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractPageContent });
+        const data = await apiFetch("/browser/summarize", { method: "POST", body: JSON.stringify({ ...page, consent: true }) });
+        await chrome.storage.local.set({ lastSummary: data }); sendResponse({ success: true, data }); return;
       }
-    });
-    return true; // Keep channel open for async response
-  }
+      if (request.action === "analyze_selection") {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        const [{ result: selection }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractSelection });
+        if (!selection.text) throw new Error("Select text on the page first. Nothing is captured automatically.");
+        const data = await apiFetch("/writing/analyze", { method: "POST", body: JSON.stringify({ ...selection, operation: request.operation || "summarize", consent: true }) });
+        sendResponse({ success: true, data }); return;
+      }
+      sendResponse({ success: false, error: "Unknown action" });
+    } catch (error) { sendResponse({ success: false, error: error.message }); }
+  })();
+  return true;
 });

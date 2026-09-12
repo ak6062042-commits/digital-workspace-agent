@@ -10,18 +10,22 @@
     },
     "active_app": {
       "type": ["string", "null"],
+      "maxLength": 255,
       "description": "Name of the currently focused application (e.g. Google Chrome, Visual Studio Code)"
     },
     "active_window_title": {
       "type": ["string", "null"],
+      "maxLength": 500,
       "description": "Title of the currently active window"
     },
     "browser_url": {
       "type": ["string", "null"],
+      "maxLength": 1000,
       "description": "URL of the active browser tab if the active app is a browser"
     },
     "browser_tab_title": {
       "type": ["string", "null"],
+      "maxLength": 500,
       "description": "Title of the active browser tab if the active app is a browser"
     },
     "captured_at": {

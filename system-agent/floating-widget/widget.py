@@ -1,4 +1,6 @@
 import sys
+import os
+from pathlib import Path
 import webbrowser
 import requests
 from PyQt5.QtWidgets import (
@@ -9,7 +11,26 @@ from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPainter, QBrush
 
 BACKEND_URL = "http://localhost:8000"
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_project_env():
+    env_file = ROOT / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_project_env()
+API_TOKEN = os.getenv("API_TOKEN", "")
 POLL_INTERVAL_MS = 20000  # 20 seconds
+
+
+def api_headers():
+    return {"X-Workspace-Token": API_TOKEN}
 
 
 class DataFetcher(QThread):
@@ -19,19 +40,19 @@ class DataFetcher(QThread):
     def run(self):
         suggestions, tasks, notifications = [], [], []
         try:
-            r = requests.get(f"{BACKEND_URL}/api/planner/suggestions", timeout=2)
+            r = requests.get(f"{BACKEND_URL}/api/planner/suggestions", headers=api_headers(), timeout=2)
             if r.ok:
                 suggestions = r.json()
         except Exception:
             pass
         try:
-            r = requests.get(f"{BACKEND_URL}/api/tasks", params={"done": False}, timeout=2)
+            r = requests.get(f"{BACKEND_URL}/api/tasks", params={"done": False}, headers=api_headers(), timeout=2)
             if r.ok:
                 tasks = r.json()
         except Exception:
             pass
         try:
-            r = requests.get(f"{BACKEND_URL}/api/notifications", params={"reviewed": False}, timeout=2)
+            r = requests.get(f"{BACKEND_URL}/api/notifications", params={"reviewed": False}, headers=api_headers(), timeout=2)
             if r.ok:
                 notifications = r.json()
         except Exception:
@@ -51,9 +72,9 @@ class ActionThread(QThread):
     def run(self):
         try:
             if self.method == "POST":
-                requests.post(self.url, timeout=3)
+                requests.post(self.url, headers=api_headers(), timeout=3)
             elif self.method == "PATCH":
-                requests.patch(self.url, timeout=3)
+                requests.patch(self.url, headers=api_headers(), timeout=3)
         except Exception:
             pass
         self.done.emit()

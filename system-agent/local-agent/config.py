@@ -7,14 +7,30 @@ LOCAL_AGENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = LOCAL_AGENT_DIR.parent.parent
 DB_FILE_PATH = PROJECT_ROOT / "backend" / "db" / "app.db"
 
+
+def _load_project_env():
+    env_file = PROJECT_ROOT / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        if "=" not in line or line.lstrip().startswith("#"):
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_project_env()
+
 # Server Configuration
 BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000/api/snapshot")
 LATEST_SNAPSHOT_URL = os.getenv("LATEST_SNAPSHOT_URL", "http://localhost:8000/api/snapshot/latest")
+API_TOKEN = os.getenv("API_TOKEN", "")
 
 # Watcher Configuration
 POLL_INTERVAL = float(os.getenv("AGENT_POLL_INTERVAL", "3.0"))  # Seconds between checks
 FORCE_HEARTBEAT_INTERVAL = float(os.getenv("AGENT_HEARTBEAT_INTERVAL", "30.0"))  # Send even if unchanged
 DIRECT_DB_FALLBACK = os.getenv("DIRECT_DB_FALLBACK", "true").lower() in ("true", "1", "yes")
+CAPTURE_ENABLED = os.getenv("CAPTURE_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # OS Platform Identification
 OS_PLATFORM = sys.platform  # 'darwin', 'win32', 'linux'

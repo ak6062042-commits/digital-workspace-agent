@@ -1,142 +1,149 @@
-import os
-import sys
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+"""Secure local API for the Digital Workspace Agent."""
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Depends, Query, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
+from sqlalchemy import delete
 
-# Ensure project root is in python path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-from backend.db.db import init_db, get_session
-from backend.db.models import StateSnapshot, Task, Notification, WritingSuggestion
+from backend.core.config import settings
+from backend.core.privacy import redact_sensitive_text, safe_excerpt
+from backend.core.security import limit_request_size, require_api_token
 from backend.coordinator.router import coordinator
-
 from backend.coordinator.scheduler import PlannerScheduler
+from backend.db.db import get_session, init_db
+from backend.db.models import Notification, StateSnapshot, Task, WritingSuggestion
+from backend.tools.browser_tool import open_url_in_browser
+from backend.tools.os_tool import list_allowed_apps, open_desktop_app, open_terminal
 
-planner = PlannerScheduler(coordinator)
+planner_scheduler = PlannerScheduler(coordinator)
 
 
-# Pydantic Request/Response Models
 class SnapshotCreateRequest(BaseModel):
-    active_app: Optional[str] = None
-    active_window_title: Optional[str] = None
-    browser_url: Optional[str] = None
-    browser_tab_title: Optional[str] = None
-    captured_at: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    active_app: str | None = Field(default=None, max_length=255)
+    active_window_title: str | None = Field(default=None, max_length=500)
+    browser_url: str | None = Field(default=None, max_length=1000)
+    browser_tab_title: str | None = Field(default=None, max_length=500)
+    captured_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class TaskCreateRequest(BaseModel):
-    title: str = Field(..., min_length=1)
-    description: Optional[str] = None
-    due_at: Optional[datetime] = None
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+    due_at: datetime | None = None
+    status: Literal["pending", "ongoing"] = "pending"
 
 
 class TaskUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    done: Optional[bool] = None
-    due_at: Optional[datetime] = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=4000)
+    done: bool | None = None
+    status: Literal["pending", "ongoing", "done"] | None = None
+    due_at: datetime | None = None
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1)
-    session_id: Optional[str] = "default_session"
-    include_state: Optional[bool] = True
+    message: str = Field(min_length=1, max_length=4000)
+    session_id: str = Field(default="default_session", min_length=1, max_length=128)
+    include_state: bool = True
+
+
+class ConfirmationRequest(BaseModel):
+    approved: bool
+
+
+class BrowserOpenRequest(BaseModel):
+    url: HttpUrl
+
+
+class BrowserSummarizeRequest(BaseModel):
+    url: HttpUrl
+    title: str = Field(default="Web Page", max_length=500)
+    content: str = Field(min_length=1, max_length=4000)
+    consent: bool = False
 
 
 class NotificationIngestRequest(BaseModel):
-    source: Optional[str] = "unknown"
-    title: str = Field(..., min_length=1)
-    content: Optional[str] = ""
+    source: str = Field(default="unknown", max_length=255)
+    title: str = Field(min_length=1, max_length=500)
+    content: str = Field(default="", max_length=2000)
+
 
 class WritingAnalyzeRequest(BaseModel):
-    url: str
-    title: Optional[str] = "Untitled"
-    text: str = Field(..., min_length=1)
+    url: str | None = Field(default=None, max_length=1000)
+    title: str = Field(default="Untitled", max_length=500)
+    text: str = Field(min_length=1, max_length=2000)
+    operation: Literal["summarize", "improve", "explain", "ideas"] = "summarize"
+    consent: bool = False
+
+
+class AppLaunchRequest(BaseModel):
+    app_id: str = Field(min_length=1, max_length=32)
+
+
+def _prune_expired_data() -> None:
+    now = datetime.utcnow()
+    with get_session() as session:
+        session.execute(delete(StateSnapshot).where(StateSnapshot.captured_at < now - timedelta(days=settings.snapshot_retention_days)))
+        session.execute(delete(Notification).where(Notification.created_at < now - timedelta(days=settings.content_retention_days)))
+        session.execute(delete(WritingSuggestion).where(WritingSuggestion.created_at < now - timedelta(days=settings.content_retention_days)))
+        session.commit()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
+    settings.validate_runtime()
     init_db()
-    planner.start()
+    _prune_expired_data()
+    planner_scheduler.start()
     yield
-    planner.stop()
+    planner_scheduler.stop()
 
-app = FastAPI(
-    title="Digital Workspace Agent API",
-    description="Backend API supporting Coordinator AI, State Agent, Task Agent, Web Research Agent, and Frontend.",
-    version="1.0.0",
-    lifespan=lifespan,
-)
 
-# Enable CORS for frontend and browser extensions
+app = FastAPI(title="Digital Workspace Agent API", version="2.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "X-Workspace-Token"],
 )
+app.middleware("http")(limit_request_size)
 
 
 @app.get("/health")
 def health_check():
-    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "ok", "mode": "local-authenticated", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
-# ============================================================================
-# Track A & Coordinator: AI Chat & Agent Routing
-# ============================================================================
+api = APIRouter(prefix="/api", dependencies=[Depends(require_api_token)])
 
-@app.post("/api/chat")
+
+@api.post("/chat")
 def chat_with_coordinator(payload: ChatRequest):
-    """
-    Direct user query to the Coordinator Agent which routes to:
-    - task_agent (task management)
-    - state_agent (what was I working on / what changed)
-    - web_agent (search + fetch research)
-    - coordinator (general help)
-    """
-    result = coordinator.handle_message(
-        message=payload.message,
-        session_id=payload.session_id or "default_session",
-        include_state=payload.include_state if payload.include_state is not None else True,
-    )
-    return result
+    return coordinator.handle_message(payload.message, payload.session_id, payload.include_state)
 
 
-# ============================================================================
-# Track C: State Snapshot & Diff Endpoints
-# ============================================================================
+@api.post("/actions/{confirmation_id}/confirm")
+def confirm_action(confirmation_id: str, payload: ConfirmationRequest):
+    return coordinator.confirm_action(confirmation_id, payload.approved)
 
-@app.post("/api/snapshot", status_code=status.HTTP_201_CREATED)
+
+@api.post("/snapshot", status_code=status.HTTP_201_CREATED)
 def create_state_snapshot(payload: SnapshotCreateRequest):
-    """
-    Ingest a new OS / browser state snapshot from the local agent or browser extension.
-    """
-    captured_dt = None
-    if payload.captured_at:
-        try:
-            captured_dt = datetime.fromisoformat(payload.captured_at.replace("Z", "+00:00"))
-        except Exception:
-            captured_dt = datetime.utcnow()
-    else:
-        captured_dt = datetime.utcnow()
-
+    captured_at = payload.captured_at or datetime.utcnow()
     with get_session() as session:
         snapshot = StateSnapshot(
             active_app=payload.active_app,
             active_window_title=payload.active_window_title,
             browser_url=payload.browser_url,
             browser_tab_title=payload.browser_tab_title,
-            captured_at=captured_dt,
+            captured_at=captured_at,
         )
         session.add(snapshot)
         session.commit()
@@ -144,368 +151,140 @@ def create_state_snapshot(payload: SnapshotCreateRequest):
         return {"status": "success", "snapshot": snapshot.to_dict()}
 
 
-@app.get("/api/snapshot/latest")
+@api.get("/snapshot/latest")
 def get_latest_state_snapshot():
-    """
-    Retrieve the most recent state snapshot recorded in the database.
-    """
     with get_session() as session:
-        snapshot = (
-            session.query(StateSnapshot)
-            .order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc())
-            .first()
-        )
-        if not snapshot:
-            return None
-        return snapshot.to_dict()
+        snapshot = session.query(StateSnapshot).order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc()).first()
+        return snapshot.to_dict() if snapshot else None
 
 
-@app.get("/api/snapshot/diff")
+@api.get("/snapshot/diff")
 def get_snapshot_diff(limit: int = Query(5, ge=2, le=20)):
-    """
-    Compute workspace state transitions across the last N snapshots.
-    """
     return coordinator.state_agent.diff_snapshots(limit=limit)
 
 
-@app.get("/api/snapshot/history")
+@api.get("/snapshot/history")
 def get_snapshot_history(limit: int = Query(20, ge=1, le=100)):
-    """
-    Retrieve a historical list of recent state snapshots.
-    """
     with get_session() as session:
-        snapshots = (
-            session.query(StateSnapshot)
-            .order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc())
-            .limit(limit)
-            .all()
-        )
-        return [s.to_dict() for s in snapshots]
+        snapshots = session.query(StateSnapshot).order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc()).limit(limit).all()
+        return [snapshot.to_dict() for snapshot in snapshots]
 
 
-# ============================================================================
-# Task Management Endpoints
-# ============================================================================
+@api.delete("/snapshot/history")
+def delete_snapshot_history():
+    with get_session() as session:
+        deleted = session.query(StateSnapshot).delete()
+        session.commit()
+    return {"status": "deleted", "count": deleted}
 
-@app.get("/api/tasks")
-def list_tasks(done: Optional[bool] = None):
-    """
-    List tasks, optionally filtered by completion status.
-    """
+
+@api.get("/tasks")
+def list_tasks(done: bool | None = None, task_status: Literal["pending", "ongoing", "done"] | None = None):
     with get_session() as session:
         query = session.query(Task)
         if done is not None:
             query = query.filter(Task.done == done)
-        tasks = query.order_by(Task.created_at.desc()).all()
-        return [t.to_dict() for t in tasks]
+        if task_status:
+            query = query.filter(Task.status == task_status)
+        return [task.to_dict() for task in query.order_by(Task.created_at.desc()).all()]
 
 
-@app.post("/api/tasks", status_code=status.HTTP_201_CREATED)
+@api.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(payload: TaskCreateRequest):
-    """
-    Create a new task in the database.
-    """
     with get_session() as session:
-        task = Task(
-            title=payload.title,
-            description=payload.description,
-            due_at=payload.due_at,
-        )
+        task = Task(title=payload.title, description=payload.description, due_at=payload.due_at, status=payload.status, done=False)
         session.add(task)
         session.commit()
         session.refresh(task)
         return task.to_dict()
 
 
-@app.patch("/api/tasks/{task_id}")
+@api.patch("/tasks/{task_id}")
 def update_task(task_id: int, payload: TaskUpdateRequest):
-    """
-    Update or toggle task completion.
-    """
     with get_session() as session:
-        task = session.query(Task).filter(Task.id == task_id).first()
+        task = session.get(Task, task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-
-        if payload.title is not None:
-            task.title = payload.title
-        if payload.description is not None:
-            task.description = payload.description
+        for field in ("title", "description", "due_at"):
+            value = getattr(payload, field)
+            if value is not None:
+                setattr(task, field, value)
+        if payload.status is not None:
+            task.status = payload.status
+            task.done = payload.status == "done"
         if payload.done is not None:
             task.done = payload.done
-        if payload.due_at is not None:
-            task.due_at = payload.due_at
-
+            task.status = "done" if payload.done else ("pending" if task.status == "done" else task.status)
         session.commit()
         session.refresh(task)
         return task.to_dict()
 
 
-# ============================================================================
-# Desktop Browser Control Endpoints
-# ============================================================================
+@api.get("/apps")
+def approved_apps():
+    return list_allowed_apps()
 
-class BrowserOpenRequest(BaseModel):
-    url: str = Field(..., min_length=1)
 
-@app.post("/api/browser/open")
+@api.post("/os/app")
+def launch_desktop_app(payload: AppLaunchRequest):
+    return open_desktop_app(payload.app_id)
+
+
+@api.post("/os/terminal")
+def launch_terminal():
+    return open_terminal()
+
+
+@api.post("/browser/open")
 def open_browser(payload: BrowserOpenRequest):
-    """
-    Directly launch or navigate the desktop browser to a given URL.
-    """
-    from backend.tools.browser_tool import open_url_in_browser
-    success = open_url_in_browser(payload.url, bring_to_front=True)
-    return {"status": "success" if success else "failed", "url": payload.url}
+    url = str(payload.url)
+    success = open_url_in_browser(url, bring_to_front=True)
+    return {"status": "success" if success else "failed", "url": url}
 
 
-# ============================================================================
-# Browser Companion AI Intelligence
-# ============================================================================
-
-class BrowserSummarizeRequest(BaseModel):
-    url: str
-    title: Optional[str] = "Web Page"
-    content: Optional[str] = ""
-
-@app.post("/api/browser/summarize")
+@api.post("/browser/summarize")
 def summarize_browser_tab(payload: BrowserSummarizeRequest):
-    """
-    Synthesize active webpage content using AI.
-    Extracts high-level work context, key takeaways, and suggested actionable tasks.
-    Attaches to the active coordinator context store for seamless recall.
-    """
-    import re
-    import json
-    from backend.coordinator.context_store import context_store
-
-    clean_text = (payload.content or "").strip()[:4000]
-    title = payload.title or "Untitled Page"
-    url = payload.url or ""
-
-    # 1. Deduce topic from title and domain
-    domain = url.split("//")[-1].split("/")[0].replace("www.", "") if "//" in url else "web"
-    sentences = [s.strip() for s in re.split(r'[.\n]+', clean_text) if len(s.strip()) > 20]
-    
-    summary_sentences = sentences[:2] if len(sentences) >= 2 else sentences[:1]
-    summary_text = " ".join(summary_sentences) if summary_sentences else f"Actively reviewing {title}."
-
-    # Infer domain category
-    lower_title = (title + " " + clean_text[:600]).lower()
-    if any(k in lower_title for k in ["api", "doc", "endpoint", "sdk", "reference"]):
-        work_cat = "API & SDK Documentation"
-    elif any(k in lower_title for k in ["react", "vue", "frontend", "css", "html", "javascript", "typescript", "tailwind"]):
-        work_cat = "Frontend Architecture"
-    elif any(k in lower_title for k in ["python", "fastapi", "docker", "kubernetes", "backend", "db", "database", "sql"]):
-        work_cat = "Backend & Systems Infrastructure"
-    elif any(k in lower_title for k in ["github", "pr", "commit", "pull request", "merge", "branch"]):
-        work_cat = "Code Review & Version Control"
-    elif any(k in lower_title for k in ["price", "pricing", "plan", "billing", "tier"]):
-        work_cat = "Tool Pricing & Comparison"
-    else:
-        work_cat = f"Technical Research ({domain})"
-
-    key_takeaways = [s for s in sentences[1:4]] if len(sentences) > 2 else [f"Focused on {title}"]
-    suggested_task = f"Implement patterns from {title[:35]}"
-
-    # Try fast LLM if available in environment
-    llm_api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")
-    if llm_api_key:
-        try:
-            from openai import OpenAI
-            base_url = "https://api.groq.com/openai/v1" if os.environ.get("GROQ_API_KEY") else None
-            api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY")
-            model = "llama-3.1-8b-instant" if os.environ.get("GROQ_API_KEY") else "gpt-4o-mini"
-            client = OpenAI(api_key=api_key, base_url=base_url)
-            json_format_instruction = '{"work_context": string, "summary": string, "key_takeaways": [string], "suggested_task": string}'
-            user_prompt = f"URL: {url}\nTitle: {title}\nContent:\n{clean_text}\n\nRespond with a JSON object: {json_format_instruction}"
-            resp = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are a workspace research AI. Summarize the given webpage content for a developer assistant."},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.2,
-                max_tokens=300
-            )
-            parsed = json.loads(resp.choices[0].message.content)
-            work_cat = parsed.get("work_context", work_cat)
-            summary_text = parsed.get("summary", summary_text)
-            key_takeaways = parsed.get("key_takeaways", key_takeaways)
-            suggested_task = parsed.get("suggested_task", suggested_task)
-        except Exception:
-            pass
-
-    result = {
+    if not payload.consent:
+        raise HTTPException(status_code=403, detail="Explicit content consent is required")
+    clean_text = redact_sensitive_text(payload.content, limit=4000)
+    sentences = [part.strip() for part in clean_text.replace("\n", " ").split(".") if len(part.strip()) > 20]
+    summary = ". ".join(sentences[:2]) or f"Reviewing {payload.title}."
+    return {
         "success": True,
-        "url": url,
-        "title": title,
-        "work_context": work_cat,
-        "summary": summary_text,
-        "key_takeaways": key_takeaways,
-        "suggested_task": suggested_task,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "url": str(payload.url),
+        "title": payload.title,
+        "work_context": "Explicit browser-page summary",
+        "summary": summary,
+        "key_takeaways": sentences[2:5] or ["No additional local takeaways were identified."],
+        "external_processing": False,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Store in context store for the Digital State Agent
-    context_store.set_browser_summary(result)
 
-    return result
-
-
-# ============================================================================
-# Desktop OS & Terminal Control Endpoints
-# ============================================================================
-
-class AppLaunchRequest(BaseModel):
-    app_name: str = Field(..., min_length=1)
-
-@app.post("/api/os/terminal")
-def launch_terminal():
-    """
-    Launch native desktop Terminal on macOS.
-    """
-    from backend.tools.os_tool import open_terminal
-    res = open_terminal()
-    return res
-
-@app.post("/api/os/app")
-def launch_desktop_app(payload: AppLaunchRequest):
-    """
-    Launch native desktop application (VS Code, Finder, Calculator, Notes, etc.)
-    """
-    from backend.tools.os_tool import open_desktop_app
-    res = open_desktop_app(payload.app_name)
-    return res
+def _writing_suggestion(text: str, operation: str) -> str:
+    sentences = [part.strip() for part in text.replace("\n", " ").split(".") if part.strip()]
+    if operation == "improve":
+        return "Local improvement: shorten long sentences, use one main idea per paragraph, and replace vague verbs with specific actions."
+    if operation == "explain":
+        return f"Local explanation: the passage is primarily about {sentences[0][:180] if sentences else 'the submitted text'}."
+    if operation == "ideas":
+        return "Local ideas: add a concrete example, state the intended outcome, and list one question the reader should be able to answer."
+    return ". ".join(sentences[:2])[:500] or "No summary could be produced from the submitted text."
 
 
-# ============================================================================
-# Demo Utility Endpoints
-# ============================================================================
-
-@app.post("/api/demo/seed")
-def reseed_demo_data():
-    """
-    Seed fresh demo tasks and snapshots for hackathon presentations.
-    """
-    from scripts.seed_data import seed
-    seed()
-    return {"status": "success", "message": "Demo data refreshed"}
-
-# ============================================================================
-# Planner / Scheduler Endpoints
-# ============================================================================
-
-@app.get("/api/planner/status")
-def planner_status():
-    return planner.get_status()
-
-
-@app.get("/api/planner/suggestions")
-def planner_suggestions():
-    return planner.get_suggestions()
-
-
-@app.post("/api/planner/suggestions/{suggestion_id}/dismiss")
-def dismiss_planner_suggestion(suggestion_id: int):
-    ok = planner.dismiss_suggestion(suggestion_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Suggestion not found")
-    return {"status": "dismissed", "id": suggestion_id}
-
-# ============================================================================
-# Notification Queue Endpoints
-# ============================================================================
-
-def _summarize_notification(title: str, content: str) -> str:
-    text = (content or "").strip()
-    if not text:
-        return title
-    first_sentence = text.split(".")[0].strip()
-    if len(first_sentence) > 140:
-        first_sentence = first_sentence[:140].rstrip() + "..."
-    return first_sentence or title
-
-
-@app.post("/api/notifications", status_code=status.HTTP_201_CREATED)
-def ingest_notification(payload: NotificationIngestRequest):
-    """
-    Accepts a raw notification, summarizes it, and queues it for later review.
-    """
-    summary = _summarize_notification(payload.title, payload.content or "")
-    with get_session() as session:
-        note = Notification(
-            source=payload.source,
-            raw_title=payload.title,
-            raw_content=payload.content,
-            summary=summary,
-            reviewed=False,
-        )
-        session.add(note)
-        session.commit()
-        session.refresh(note)
-        return note.to_dict()
-
-
-@app.get("/api/notifications")
-def list_notifications(reviewed: Optional[bool] = None):
-    with get_session() as session:
-        query = session.query(Notification)
-        if reviewed is not None:
-            query = query.filter(Notification.reviewed == reviewed)
-        notes = query.order_by(Notification.created_at.desc()).all()
-        return [n.to_dict() for n in notes]
-
-
-@app.patch("/api/notifications/{notification_id}/review")
-def mark_notification_reviewed(notification_id: int):
-    with get_session() as session:
-        note = session.query(Notification).filter(Notification.id == notification_id).first()
-        if not note:
-            raise HTTPException(status_code=404, detail="Notification not found")
-        note.reviewed = True
-        session.commit()
-        session.refresh(note)
-        return note.to_dict()
-
-# ============================================================================
-# Writing Assist Endpoints
-# ============================================================================
-
-@app.post("/api/writing/analyze", status_code=status.HTTP_201_CREATED)
+@api.post("/writing/analyze", status_code=status.HTTP_201_CREATED)
 def analyze_writing(payload: WritingAnalyzeRequest):
-    """
-    Accepts a snapshot of actively-typed text, searches for related resources,
-    and queues a suggestion for later review (never interrupts the user).
-    """
-    import json as _json
-
-    text = payload.text.strip()
-    excerpt = text[:300]
-    topic_words = " ".join(text.split()[:12])
-    query = topic_words or (payload.title or "this topic")
-
-    related_links = None
-    suggestion_text = f'You\'re writing about: "{topic_words[:80]}"'
-
-    try:
-        agent_result = coordinator.web_agent.handle(f"related resources for {query}")
-        browser_info = agent_result.get("browser_info")
-        response_text = agent_result.get("response", "")
-        if browser_info:
-            related_links = _json.dumps(browser_info)
-        if response_text:
-            suggestion_text = response_text[:500]
-    except Exception:
-        pass
-
+    if not payload.consent:
+        raise HTTPException(status_code=403, detail="Writing analysis requires explicit consent")
+    redacted = redact_sensitive_text(payload.text, limit=2000)
+    suggestion_text = _writing_suggestion(redacted, payload.operation)
     with get_session() as session:
         suggestion = WritingSuggestion(
             source_url=payload.url,
             source_title=payload.title,
-            excerpt=excerpt,
+            excerpt=safe_excerpt(redacted),
             suggestion_text=suggestion_text,
-            related_links=related_links,
+            related_links=None,
             reviewed=False,
         )
         session.add(suggestion)
@@ -514,26 +293,105 @@ def analyze_writing(payload: WritingAnalyzeRequest):
         return suggestion.to_dict()
 
 
-@app.get("/api/writing/suggestions")
-def list_writing_suggestions(reviewed: Optional[bool] = None):
+@api.get("/writing/suggestions")
+def list_writing_suggestions(reviewed: bool | None = None):
     with get_session() as session:
         query = session.query(WritingSuggestion)
         if reviewed is not None:
             query = query.filter(WritingSuggestion.reviewed == reviewed)
-        items = query.order_by(WritingSuggestion.created_at.desc()).all()
-        return [i.to_dict() for i in items]
+        return [item.to_dict() for item in query.order_by(WritingSuggestion.created_at.desc()).all()]
 
 
-@app.patch("/api/writing/suggestions/{suggestion_id}/review")
+@api.patch("/writing/suggestions/{suggestion_id}/review")
 def mark_writing_suggestion_reviewed(suggestion_id: int):
     with get_session() as session:
-        item = session.query(WritingSuggestion).filter(WritingSuggestion.id == suggestion_id).first()
+        item = session.get(WritingSuggestion, suggestion_id)
         if not item:
-            raise HTTPException(status_code=404, detail="Suggestion not found")
+            raise HTTPException(status_code=404, detail="Writing suggestion not found")
         item.reviewed = True
         session.commit()
-        session.refresh(item)
         return item.to_dict()
+
+
+@api.delete("/writing/suggestions/{suggestion_id}")
+def delete_writing_suggestion(suggestion_id: int):
+    with get_session() as session:
+        item = session.get(WritingSuggestion, suggestion_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Writing suggestion not found")
+        session.delete(item)
+        session.commit()
+    return {"status": "deleted", "id": suggestion_id}
+
+
+@api.post("/notifications", status_code=status.HTTP_201_CREATED)
+def ingest_notification(payload: NotificationIngestRequest):
+    content = redact_sensitive_text(payload.content, limit=2000)
+    summary = (content.split(".")[0].strip() or payload.title)[:300]
+    with get_session() as session:
+        note = Notification(source=payload.source, raw_title=safe_excerpt(payload.title, 500), raw_content=content, summary=summary, reviewed=False)
+        session.add(note)
+        session.commit()
+        session.refresh(note)
+        return note.to_dict()
+
+
+@api.get("/notifications")
+def list_notifications(reviewed: bool | None = None):
+    with get_session() as session:
+        query = session.query(Notification)
+        if reviewed is not None:
+            query = query.filter(Notification.reviewed == reviewed)
+        return [note.to_dict() for note in query.order_by(Notification.created_at.desc()).all()]
+
+
+@api.patch("/notifications/{notification_id}/review")
+def mark_notification_reviewed(notification_id: int):
+    with get_session() as session:
+        note = session.get(Notification, notification_id)
+        if not note:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        note.reviewed = True
+        session.commit()
+        return note.to_dict()
+
+
+@api.delete("/notifications/{notification_id}")
+def delete_notification(notification_id: int):
+    with get_session() as session:
+        note = session.get(Notification, notification_id)
+        if not note:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        session.delete(note)
+        session.commit()
+    return {"status": "deleted", "id": notification_id}
+
+
+@api.get("/planner/status")
+def planner_status():
+    return planner_scheduler.get_status()
+
+
+@api.get("/planner/suggestions")
+def planner_suggestions():
+    return planner_scheduler.get_suggestions()
+
+
+@api.post("/planner/suggestions/{suggestion_id}/dismiss")
+def dismiss_planner_suggestion(suggestion_id: int):
+    if not planner_scheduler.dismiss_suggestion(suggestion_id):
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return {"status": "dismissed", "id": suggestion_id}
+
+
+@api.get("/settings")
+def public_settings():
+    return {"capture_enabled": settings.capture_enabled, "external_llm_enabled": settings.allow_external_llm, "retention": {"snapshots_days": settings.snapshot_retention_days, "content_days": settings.content_retention_days}}
+
+
+app.include_router(api)
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host=settings.backend_host, port=settings.backend_port, reload=False)

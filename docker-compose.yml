@@ -1,34 +1,32 @@
-version: '3.8'
-
 services:
   backend:
     image: python:3.11-slim
-    container_name: workspace_backend
     working_dir: /app
+    env_file: .env
+    environment:
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      ALLOW_CONTAINER_BIND: "true"
+      DATABASE_URL: sqlite:///./backend/db/app.db
+      PYTHONUNBUFFERED: "1"
     volumes:
       - .:/app
     ports:
-      - "8000:8000"
-    environment:
-      - BACKEND_HOST=0.0.0.0
-      - BACKEND_PORT=8000
-      - DATABASE_URL=sqlite:///./backend/db/app.db
-      - PYTHONUNBUFFERED=1
+      - "127.0.0.1:8000:8000"
     command: >
-      bash -c "pip install --no-cache-dir -r backend/requirements.txt &&
-               uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "pip install --no-cache-dir -r backend/requirements.txt &&
+             uvicorn backend.main:app --host 0.0.0.0 --port 8000"
 
   frontend:
     image: node:20-slim
-    container_name: workspace_frontend
     working_dir: /app/frontend
+    environment:
+      VITE_API_TOKEN: ${API_TOKEN}
+      VITE_PROXY_TARGET: http://backend:8000
     volumes:
       - ./frontend:/app/frontend
     ports:
-      - "5173:5173"
-    environment:
-      - VITE_BACKEND_URL=http://localhost:8000
-    command: >
-      sh -c "npm install && npm run dev -- --host 0.0.0.0"
+      - "127.0.0.1:5173:5173"
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
     depends_on:
       - backend

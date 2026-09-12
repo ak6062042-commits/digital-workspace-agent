@@ -14,6 +14,8 @@ class Task(Base):
     done = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     due_at = Column(DateTime, nullable=True)  
+    status = Column(String(20), default="pending", nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=True)
 
     def to_dict(self):
         return {
@@ -23,6 +25,8 @@ class Task(Base):
             "done": self.done,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "due_at": self.due_at.isoformat() if self.due_at else None,
+            "status": "done" if self.done else (self.status or "pending"),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -57,16 +61,18 @@ class Notification(Base):
     reviewed = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_raw: bool = False):
+        payload = {
             "id": self.id,
             "source": self.source,
-            "raw_title": self.raw_title,
-            "raw_content": self.raw_content,
             "summary": self.summary,
             "reviewed": self.reviewed,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if include_raw:
+            payload["raw_title"] = self.raw_title
+            payload["raw_content"] = self.raw_content
+        return payload
 
 class WritingSuggestion(Base):
     __tablename__ = "writing_suggestions"

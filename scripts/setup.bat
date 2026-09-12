@@ -7,15 +7,7 @@ echo ========================================================
 echo     Digital Workspace Agent — Windows Setup Script
 echo ========================================================
 
-rem 1. Environment Configuration
-if not exist "%PROJECT_ROOT%\.env" (
-    echo [+] Creating .env from .env.example...
-    copy "%PROJECT_ROOT%\.env.example" "%PROJECT_ROOT%\.env"
-) else (
-    echo [*] .env file already exists.
-)
-
-rem 2. Python Virtual Environment Setup
+rem 1. Python Virtual Environment Setup
 set VENV_DIR=%PROJECT_ROOT%\.venv
 if not exist "%VENV_DIR%" (
     echo [+] Creating virtual environment in %VENV_DIR%...
@@ -26,14 +18,17 @@ if not exist "%VENV_DIR%" (
 
 call "%VENV_DIR%\Scripts\activate.bat"
 
+echo [+] Creating or validating secure local configuration...
+python "%PROJECT_ROOT%\scripts\bootstrap_config.py"
+
 echo [+] Upgrading pip and installing Python dependencies...
 python -m pip install --quiet --upgrade pip
 python -m pip install -r "%PROJECT_ROOT%\backend\requirements.txt"
 python -m pip install -r "%PROJECT_ROOT%\system-agent\local-agent\requirements.txt"
 
-rem 3. Database Initialization & Seeding
-echo [+] Initializing SQLite database and seeding demo data...
-python "%PROJECT_ROOT%\scripts\seed_data.py"
+rem 3. Database Initialization (demo data is intentionally opt-in)
+echo [+] Initializing database schema...
+python -c "from backend.db.db import init_db; init_db(); print('Database initialized')"
 
 rem 4. Frontend Dependencies
 where npm >nul 2>nul
@@ -52,9 +47,11 @@ echo ========================================================
 echo To activate virtual environment:
 echo   .venv\Scripts\activate
 echo To start backend server:
-echo   uvicorn backend.main:app --port 8000 --reload
+echo   scripts\run_backend.bat
 echo To start local agent watcher:
 echo   python system-agent\local-agent\watcher.py
 echo To start React frontend:
-echo   cd frontend ^&^& npm run dev
+echo   scripts\run_frontend.bat
+echo To run tests:
+echo   scripts\test.bat
 echo ========================================================

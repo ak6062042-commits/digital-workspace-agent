@@ -45,3 +45,49 @@ class StateSnapshot(Base):
             "browser_tab_title": self.browser_tab_title,
             "captured_at": self.captured_at.isoformat() if self.captured_at else None,
         }
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String(255), nullable=True)       # e.g. "gmail", "slack", "browser"
+    raw_title = Column(String(500), nullable=True)
+    raw_content = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    reviewed = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "source": self.source,
+            "raw_title": self.raw_title,
+            "raw_content": self.raw_content,
+            "summary": self.summary,
+            "reviewed": self.reviewed,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+class WritingSuggestion(Base):
+    __tablename__ = "writing_suggestions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_url = Column(String(1000), nullable=True)
+    source_title = Column(String(500), nullable=True)
+    excerpt = Column(Text, nullable=True)
+    suggestion_text = Column(Text, nullable=True)
+    related_links = Column(Text, nullable=True)
+    reviewed = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "source_url": self.source_url,
+            "source_title": self.source_title,
+            "excerpt": self.excerpt,
+            "suggestion_text": self.suggestion_text,
+            "related_links": self.related_links,
+            "reviewed": self.reviewed,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }

@@ -48,3 +48,59 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   return true;
 });
+
+// ---------------------------------------------------------------------------
+// Writing Activity Watcher
+// Debounces active typing in textareas / inputs / contenteditable regions,
+// then sends a snapshot of what's being written to the background worker.
+// ---------------------------------------------------------------------------
+
+const WRITING_DEBOUNCE_MS = 2500;
+const MIN_TEXT_LENGTH = 40;
+
+let writingDebounceTimer = null;
+let lastSentText = "";
+
+function getEditableText(el) {
+  if (!el) return "";
+  if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+    return el.value || "";
+  }
+  if (el.isContentEditable) {
+    return el.innerText || el.textContent || "";
+  }
+  return "";
+}
+
+function isEditableTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "INPUT") {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    return ["text", "search", "email", "url", ""].includes(type);
+  }
+  return !!el.isContentEditable;
+}
+
+document.addEventListener("input", (event) => {
+  const target = event.target;
+  if (!isEditableTarget(target)) return;
+
+  clearTimeout(writingDebounceTimer);
+  writingDebounceTimer = setTimeout(() => {
+    const text = getEditableText(target).trim();
+    if (text.length < MIN_TEXT_LENGTH) return;
+    if (text === lastSentText) return;
+    lastSentText = text;
+
+    const snippet = text.length > 2000 ? text.slice(0, 2000) : text;
+
+    chrome.runtime.sendMessage({
+      action: "writing_activity",
+      title: document.title || "Untitled Page",
+      url: window.location.href,
+      text: snippet
+    });
+  }, WRITING_DEBOUNCE_MS);
+}, true);

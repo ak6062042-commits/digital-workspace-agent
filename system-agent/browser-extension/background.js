@@ -2,7 +2,10 @@
 
 const BACKEND_SNAPSHOT_URL = "http://localhost:8000/api/snapshot";
 const BACKEND_SUMMARIZE_URL = "http://localhost:8000/api/browser/summarize";
+const BACKEND_WRITING_URL = "http://localhost:8000/api/writing/analyze";
+const WRITING_COOLDOWN_MS = 90000; // one analysis per tab per 90 seconds max
 
+let lastWritingAnalysisAt = {};
 let debounceTimer = null;
 let lastPostedUrl = null;
 
@@ -82,6 +85,31 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // Message listener from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Action 4 Writing Activity
+  if (request.action === "writing_activity") {
+    const tabId = sender.tab ? sender.tab.id : "unknown";
+    const now = Date.now();
+    const last = lastWritingAnalysisAt[tabId] || 0;
+    if (now - last < WRITING_COOLDOWN_MS) {
+      return false; // still on cooldown, skip silently
+    }
+    lastWritingAnalysisAt[tabId] = now;
+
+    fetch(BACKEND_WRITING_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: request.url,
+        title: request.title,
+        text: request.text
+      })
+    }).catch(err => {
+      console.info("[WorkspaceExtension] Writing analysis unreachable:", err.message);
+    });
+
+    return false;
+  }
+
   // Action 1: Manual Tab Sync
   if (request.action === "sync_now") {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {

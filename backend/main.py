@@ -14,8 +14,12 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from backend.db.db import init_db, get_session
-from backend.db.models import StateSnapshot, Task
+from backend.db.models import StateSnapshot, Task, Notification, WritingSuggestion
 from backend.coordinator.router import coordinator
+
+from backend.coordinator.scheduler import PlannerScheduler
+
+planner = PlannerScheduler(coordinator)
 
 
 # Pydantic Request/Response Models
@@ -47,12 +51,23 @@ class ChatRequest(BaseModel):
     include_state: Optional[bool] = True
 
 
+class NotificationIngestRequest(BaseModel):
+    source: Optional[str] = "unknown"
+    title: str = Field(..., min_length=1)
+    content: Optional[str] = ""
+
+class WritingAnalyzeRequest(BaseModel):
+    url: str
+    title: Optional[str] = "Untitled"
+    text: str = Field(..., min_length=1)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Ensure database tables exist
     init_db()
+    planner.start()
     yield
-
+    planner.stop()
 
 app = FastAPI(
     title="Digital Workspace Agent API",
@@ -377,7 +392,148 @@ def reseed_demo_data():
     seed()
     return {"status": "success", "message": "Demo data refreshed"}
 
+# ============================================================================
+# Planner / Scheduler Endpoints
+# ============================================================================
 
+@app.get("/api/planner/status")
+def planner_status():
+    return planner.get_status()
+
+
+@app.get("/api/planner/suggestions")
+def planner_suggestions():
+    return planner.get_suggestions()
+
+
+@app.post("/api/planner/suggestions/{suggestion_id}/dismiss")
+def dismiss_planner_suggestion(suggestion_id: int):
+    ok = planner.dismiss_suggestion(suggestion_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+    return {"status": "dismissed", "id": suggestion_id}
+
+# ============================================================================
+# Notification Queue Endpoints
+# ============================================================================
+
+def _summarize_notification(title: str, content: str) -> str:
+    text = (content or "").strip()
+    if not text:
+        return title
+    first_sentence = text.split(".")[0].strip()
+    if len(first_sentence) > 140:
+        first_sentence = first_sentence[:140].rstrip() + "..."
+    return first_sentence or title
+
+
+@app.post("/api/notifications", status_code=status.HTTP_201_CREATED)
+def ingest_notification(payload: NotificationIngestRequest):
+    """
+    Accepts a raw notification, summarizes it, and queues it for later review.
+    """
+    summary = _summarize_notification(payload.title, payload.content or "")
+    with get_session() as session:
+        note = Notification(
+            source=payload.source,
+            raw_title=payload.title,
+            raw_content=payload.content,
+            summary=summary,
+            reviewed=False,
+        )
+        session.add(note)
+        session.commit()
+        session.refresh(note)
+        return note.to_dict()
+
+
+@app.get("/api/notifications")
+def list_notifications(reviewed: Optional[bool] = None):
+    with get_session() as session:
+        query = session.query(Notification)
+        if reviewed is not None:
+            query = query.filter(Notification.reviewed == reviewed)
+        notes = query.order_by(Notification.created_at.desc()).all()
+        return [n.to_dict() for n in notes]
+
+
+@app.patch("/api/notifications/{notification_id}/review")
+def mark_notification_reviewed(notification_id: int):
+    with get_session() as session:
+        note = session.query(Notification).filter(Notification.id == notification_id).first()
+        if not note:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        note.reviewed = True
+        session.commit()
+        session.refresh(note)
+        return note.to_dict()
+
+# ============================================================================
+# Writing Assist Endpoints
+# ============================================================================
+
+@app.post("/api/writing/analyze", status_code=status.HTTP_201_CREATED)
+def analyze_writing(payload: WritingAnalyzeRequest):
+    """
+    Accepts a snapshot of actively-typed text, searches for related resources,
+    and queues a suggestion for later review (never interrupts the user).
+    """
+    import json as _json
+
+    text = payload.text.strip()
+    excerpt = text[:300]
+    topic_words = " ".join(text.split()[:12])
+    query = topic_words or (payload.title or "this topic")
+
+    related_links = None
+    suggestion_text = f'You\'re writing about: "{topic_words[:80]}"'
+
+    try:
+        agent_result = coordinator.web_agent.handle(f"related resources for {query}")
+        browser_info = agent_result.get("browser_info")
+        response_text = agent_result.get("response", "")
+        if browser_info:
+            related_links = _json.dumps(browser_info)
+        if response_text:
+            suggestion_text = response_text[:500]
+    except Exception:
+        pass
+
+    with get_session() as session:
+        suggestion = WritingSuggestion(
+            source_url=payload.url,
+            source_title=payload.title,
+            excerpt=excerpt,
+            suggestion_text=suggestion_text,
+            related_links=related_links,
+            reviewed=False,
+        )
+        session.add(suggestion)
+        session.commit()
+        session.refresh(suggestion)
+        return suggestion.to_dict()
+
+
+@app.get("/api/writing/suggestions")
+def list_writing_suggestions(reviewed: Optional[bool] = None):
+    with get_session() as session:
+        query = session.query(WritingSuggestion)
+        if reviewed is not None:
+            query = query.filter(WritingSuggestion.reviewed == reviewed)
+        items = query.order_by(WritingSuggestion.created_at.desc()).all()
+        return [i.to_dict() for i in items]
+
+
+@app.patch("/api/writing/suggestions/{suggestion_id}/review")
+def mark_writing_suggestion_reviewed(suggestion_id: int):
+    with get_session() as session:
+        item = session.query(WritingSuggestion).filter(WritingSuggestion.id == suggestion_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        item.reviewed = True
+        session.commit()
+        session.refresh(item)
+        return item.to_dict()
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)

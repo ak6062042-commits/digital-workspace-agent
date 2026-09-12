@@ -25,6 +25,7 @@ echo [+] Upgrading pip and installing Python dependencies...
 python -m pip install --quiet --upgrade pip
 python -m pip install -r "%PROJECT_ROOT%\backend\requirements.txt"
 python -m pip install -r "%PROJECT_ROOT%\system-agent\local-agent\requirements.txt"
+python -m pip install -r "%PROJECT_ROOT%\system-agent\floating-widget\requirements.txt"
 
 rem 3. Database Initialization (demo data is intentionally opt-in)
 echo [+] Initializing database schema...

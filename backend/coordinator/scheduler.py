@@ -3,20 +3,25 @@ import logging
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse
 
+from backend.core.config import settings
 from backend.db.db import get_session
 from backend.db.models import StateSnapshot
 
 logger = logging.getLogger("PlannerScheduler")
 
-TICK_INTERVAL = 15                # seconds between planner checks
-IDLE_SUGGESTION_THRESHOLD = 90     # seconds unchanged before suggesting related docs
+TICK_INTERVAL = settings.suggestion_poll_seconds
+IDLE_SUGGESTION_THRESHOLD = settings.document_suggestion_seconds
 MIN_ACTIVE_DURATION = 120          # must be focused this long before it "counts"
 ABANDON_THRESHOLD = 300            # seconds backgrounded before a task proposal
-WEB_AGENT_COOLDOWN = 600           # don't re-suggest for same context sooner than this
+WEB_AGENT_COOLDOWN = settings.document_suggestion_cooldown_seconds
 
 # Apps/domains we treat as "reading or writing" contexts worth suggesting research for
-DOC_HINT_KEYWORDS = ["doc", "notion", "word", "google docs", "overleaf", "obsidian", "notes"]
+DOC_HINT_KEYWORDS = ["document", "notion", "word", "google docs", "overleaf", "obsidian", "notes", "writer", ".md", ".txt"]
+DOCUMENT_DOMAINS = ("docs.google.com", "notion.so", "overleaf.com", "office.com", "microsoft365.com", "sharepoint.com")
+DOCUMENT_EXTENSIONS = (".doc", ".docx", ".pdf", ".md", ".txt", ".rtf", ".odt")
+WRITING_APP_HINTS = ("word", "winword", "notepad", "libreoffice", "writer", "obsidian", "typora")
 
 
 class PlannerScheduler:
@@ -148,11 +153,14 @@ class PlannerScheduler:
             )
 
     def _looks_like_document_context(self, snapshot: StateSnapshot) -> bool:
-        haystack = " ".join(filter(None, [
-            snapshot.active_app, snapshot.active_window_title,
-            snapshot.browser_url, snapshot.browser_tab_title,
-        ])).lower()
-        return any(kw in haystack for kw in DOC_HINT_KEYWORDS) or bool(snapshot.browser_url)
+        # Writing apps do not expose document text to the watcher. Their useful
+        # suggestions come only from an explicit selected/pasted-text analysis,
+        # never from a guessed window title.
+        if not snapshot.browser_url:
+            return False
+        parsed = urlparse(snapshot.browser_url)
+        hostname, path = (parsed.hostname or "").lower(), parsed.path.lower()
+        return hostname.endswith(DOCUMENT_DOMAINS) or path.endswith(DOCUMENT_EXTENSIONS)
 
     def _propose_abandoned_task(self, ctx: Dict[str, Any]):
         self._suggestion_seq += 1
@@ -169,7 +177,7 @@ class PlannerScheduler:
 
     def _trigger_web_suggestion(self, snapshot: StateSnapshot):
         query_text = snapshot.browser_tab_title or snapshot.active_window_title or snapshot.active_app
-        if not query_text:
+        if not query_text or query_text.lower().startswith(("http://", "https://")):
             return
         # Do not send window titles, URLs, or document context to a search provider automatically.
         # The UI presents this as a local suggestion; a user can then explicitly request research.
@@ -178,7 +186,8 @@ class PlannerScheduler:
             "id": self._suggestion_seq,
             "kind": "research_proposal",
             "context": query_text,
-            "response": "You have been focused here for a while. Ask for research if related sources would be useful.",
+            "response": "You have been focused here for a while. Choose a topic to search in Chrome.",
+            "related_queries": self.coordinator.web_agent.related_document_queries(query_text),
             "created_at": datetime.utcnow().isoformat(),
             "dismissed": False,
         })

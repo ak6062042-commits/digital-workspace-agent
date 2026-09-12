@@ -48,6 +48,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("LocalAgentWatcher")
 
+WIDGET_WINDOW_MARKER = "digital workspace command center"
+WIDGET_PROCESS_NAMES = {"python.exe", "pythonw.exe", "python", "pythonw"}
+
+
+def is_workspace_widget_snapshot(snapshot: Dict[str, Any]) -> bool:
+    """Return true only for this agent's PyQt command-center window.
+
+    We deliberately require both the explicit window title and a Python process
+    name, so a normal Word/VS Code document mentioning the product name is not
+    excluded from capture.
+    """
+    app = (snapshot.get("active_app") or "").strip().lower()
+    title = (snapshot.get("active_window_title") or "").strip().lower()
+    return app in WIDGET_PROCESS_NAMES and WIDGET_WINDOW_MARKER in title
+
 
 def save_to_database_directly(snapshot: Dict[str, Any]) -> bool:
     """Fallback: write the state snapshot directly to the SQLite database."""
@@ -141,11 +156,26 @@ def run_watcher(
 
     last_snapshot = None
     last_sent_time = 0.0
+    widget_was_foreground = False
 
     try:
         while True:
             current_time = time.time()
             snapshot = capture_snapshot()
+
+            # The command center is an agent control surface, not user work.
+            # Ignore it completely so it cannot overwrite the latest useful
+            # state or cause a Python/widget feedback loop.
+            if is_workspace_widget_snapshot(snapshot):
+                if not widget_was_foreground:
+                    logger.info("Workspace widget is foreground; preserving the last real workspace state.")
+                widget_was_foreground = True
+                if once:
+                    logger.info("Run-once flag specified while widget was foreground. No self-snapshot was sent.")
+                    break
+                time.sleep(interval)
+                continue
+            widget_was_foreground = False
 
             changed = has_state_changed(snapshot, last_snapshot)
             heartbeat_due = (current_time - last_sent_time) >= FORCE_HEARTBEAT_INTERVAL

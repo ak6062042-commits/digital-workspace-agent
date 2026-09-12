@@ -51,6 +51,14 @@ class Planner:
         open_match = re.match(r"^(?:open|launch|start)\s+(?:my |the )?(.+?)\.?$", query, re.I)
         if open_match:
             target = open_match.group(1).strip()
+            if target.lower() in {"this tab", "current tab", "active tab"}:
+                if state and state.get("browser_url"):
+                    return ExecutionPlan("open_current_tab", "assist", "browser.open_url", {"url": state["browser_url"]}, rationale="The user explicitly requested the active browser tab.")
+                return ExecutionPlan(
+                    "open_current_tab_unavailable", "observe", "conversation.respond",
+                    {"response": "I do not have an active browser URL yet. In the Chrome companion, paste the API token and enable Active-tab metadata sync, then try again."},
+                    rationale="Opening an unknown tab would be unsafe.",
+                )
             app_id = normalize_app_id(target)
             if app_id:
                 return ExecutionPlan("open_application", "assist", "desktop.open_app", {"app_id": app_id}, rationale="Requested application is allowlisted.", expected_result="Launch approved desktop application.")
@@ -58,8 +66,17 @@ class Planner:
                 return ExecutionPlan("open_website", "assist", "browser.open_url", {"url": target}, rationale="User supplied an HTTP(S) URL.")
         is_research = any(word in lower for word in ("search", "research", "compare", "look up", "find out", " vs "))
         if is_research:
-            launch_browser = any(phrase in lower for phrase in ("in browser", "on browser", "open chrome", "open browser"))
+            # An explicit research request opens Chrome with the search while local result collection continues.
+            launch_browser = True
             cleaned = re.sub(r"(?i)\b(?:search|research|look up|find out|compare)\b", "", query).strip(" :.-")
+            if cleaned.lower() in {"this current topic", "the current topic", "current topic", "this topic", "the topic"}:
+                current_context = state or {}
+                cleaned = (
+                    current_context.get("browser_tab_title")
+                    or current_context.get("active_window_title")
+                    or current_context.get("active_app")
+                    or cleaned
+                )
             return ExecutionPlan("web_research", "hybrid", "web.research", {"query": cleaned or query, "launch_browser": launch_browser}, rationale="Research and summarisation are low-risk; external links remain user-controlled.")
         if any(word in lower for word in ("help", "what can you do", "commands", "features")):
             return ExecutionPlan("help", "observe", "help", rationale="The user requested capability guidance.")

@@ -5,9 +5,10 @@ import { StatusIndicator } from './components/StatusIndicator';
 import { TaskPanel } from './components/TaskPanel';
 import { WorkspaceInsightsPanel } from './components/WorkspaceInsightsPanel';
 import {
-  analyzeWriting, createTask, dismissPlannerSuggestion, fetchLatestSnapshot, fetchNotifications,
-  fetchPlannerStatus, fetchPlannerSuggestions, fetchSettings, fetchTasks, fetchWritingSuggestions,
+  analyzeWriting, createTask, dismissPlannerSuggestion, fetchWorkspaceOverview,
   reviewNotification, reviewWritingSuggestion, sendMessage, toggleTask, deleteNotification, updateTask,
+  navigateToTask,
+  linkTaskToCurrentContext,
 } from './api/client';
 
 export default function App() {
@@ -24,14 +25,12 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     try {
-      const [taskData, snapshotData, noteData, writingData, plannerStatus, plannerSuggestions, publicSettings] = await Promise.all([
-        fetchTasks(), fetchLatestSnapshot(), fetchNotifications(false), fetchWritingSuggestions(false), fetchPlannerStatus(), fetchPlannerSuggestions(), fetchSettings(),
-      ]);
-      setTasks(taskData); setSnapshot(snapshotData); setNotifications(noteData); setWritingSuggestions(writingData);
-      setPlanner({ status: plannerStatus, suggestions: plannerSuggestions }); setSettings(publicSettings); setError('');
+      const overview = await fetchWorkspaceOverview();
+      setTasks(overview.tasks); setSnapshot(overview.snapshot); setNotifications(overview.notifications); setWritingSuggestions(overview.writing_suggestions);
+      setPlanner(overview.planner); setSettings(overview.settings); setError('');
     } catch (err) { setError(err.message); }
   }, []);
-  useEffect(() => { loadData(); const id = setInterval(loadData, 10000); return () => clearInterval(id); }, [loadData]);
+  useEffect(() => { loadData(); const id = setInterval(loadData, 3000); return () => clearInterval(id); }, [loadData]);
 
   const handleSendMessage = async (text) => {
     setMessages((items) => [...items, { role: 'user', content: text }]); setLoading(true);
@@ -54,8 +53,8 @@ export default function App() {
         <ChatWindow messages={messages} onSendMessage={handleSendMessage} loading={loading} voiceEnabled={voiceEnabled} onToggleVoice={() => setVoiceEnabled((value) => !value)} />
         <aside className="studio-inspector">
           <StatusIndicator snapshot={snapshot} onRefresh={loadData} onTriggerDiff={() => handleSendMessage('What changed while I was away?')} />
-          <TaskPanel tasks={tasks} onToggleTask={async (id, done) => { await toggleTask(id, done); await loadData(); }} onSetTaskStatus={async (id, taskStatus) => { await updateTask(id, { status: taskStatus }); await loadData(); }} onCreateTask={async (title) => { await createTask(title); await loadData(); }} />
-          <WorkspaceInsightsPanel notifications={notifications} writingSuggestions={writingSuggestions} planner={planner} settings={settings} onReviewNotification={async (id) => { await reviewNotification(id); await loadData(); }} onDeleteNotification={async (id) => { await deleteNotification(id); await loadData(); }} onAnalyzeWriting={handleWriting} onReviewWriting={async (id) => { await reviewWritingSuggestion(id); await loadData(); }} onDismissSuggestion={async (id) => { await dismissPlannerSuggestion(id); await loadData(); }} />
+          <TaskPanel tasks={tasks} onToggleTask={async (id, done) => { await toggleTask(id, done); await loadData(); }} onSetTaskStatus={async (id, taskStatus) => { await updateTask(id, { status: taskStatus }); await loadData(); }} onCreateTask={async (title) => { await createTask(title); await loadData(); }} onNavigateTask={async (id) => { try { await navigateToTask(id); } catch (err) { setError(err.message); } }} onLinkTask={async (id) => { try { await linkTaskToCurrentContext(id); await loadData(); } catch (err) { setError(err.message); } }} />
+          <WorkspaceInsightsPanel notifications={notifications} writingSuggestions={writingSuggestions} planner={planner} settings={settings} onReviewNotification={async (id) => { await reviewNotification(id); await loadData(); }} onDeleteNotification={async (id) => { await deleteNotification(id); await loadData(); }} onAnalyzeWriting={handleWriting} onReviewWriting={async (id) => { await reviewWritingSuggestion(id); await loadData(); }} onDismissSuggestion={async (id) => { await dismissPlannerSuggestion(id); await loadData(); }} onResearch={(query) => handleSendMessage(`Research ${query}`)} />
         </aside>
       </div>
     </main>

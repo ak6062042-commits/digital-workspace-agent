@@ -13,10 +13,10 @@ The project is designed to assist with workspace context, tasks, research, expli
 - Workspace state snapshots, history, retention, and context diffs.
 - Deterministic State -> Plan -> Validate -> Execute orchestration.
 - Task management with `pending`, `ongoing`, and user-confirmed `done` states.
-- Controlled web research and safe HTTP(S) browser opening.
-- Strict desktop-app allowlist: Terminal, VS Code, Browser, Calculator, Notes, and Files.
+- Fast Chrome research: explicit searches open as a query in Google Chrome; the backend does not scrape or summarise result pages.
+- Strict desktop-app allowlist: Terminal, VS Code, Browser, Calculator, Notes, Microsoft Word, and Files.
 - Notification inbox with review and delete controls.
-- Explicit writing analysis (summarize, improve, explain, ideas) with local redaction.
+- Explicit writing analysis (summarize, improve, explain, ideas) with local redaction, including a Word add-in that submits only selected text.
 - A unified React dashboard, Chrome companion, and floating desktop widget.
 - Local API token authentication, strict CORS, request bounds, SQLite WAL/busy timeout, retention cleanup, and tests.
 
@@ -56,14 +56,32 @@ Open `http://localhost:5173`. To start ambient state metadata collection, first 
 .venv\Scripts\python system-agent\local-agent\watcher.py
 ```
 
+The optional floating command center can run beside the dashboard after setup:
+
+```powershell
+.venv\Scripts\python system-agent\floating-widget\widget.py
+```
+
 ## Chrome companion
 
 1. Open `chrome://extensions`, enable Developer mode, and load `system-agent/browser-extension`.
 2. Open the extension popup and paste the value of `API_TOKEN` from your local `.env`.
 3. Optional: enable active-tab metadata sync. It sends only active app/tab title/URL to the local backend.
-4. Use **Summarize Tab** or **Analyze selected text** for an explicit one-time analysis.
+4. Use **Analyze selected text** for a rewrite, local improvement note, keywords, and related-document searches. The related buttons open only the query you choose in Chrome.
+
+For **Open this tab**, active-tab sync must be enabled in this popup: Windows' foreground-window watcher cannot obtain a Chrome URL on its own.
+
+When updating the extension files, use **Reload** for this extension at `chrome://extensions` before testing. A task made before context capture was available cannot be recovered automatically: focus its intended app or tab, wait for the watcher/extension to report it, then choose **Link current app/tab** on that task.
 
 The extension does not collect keystrokes, form input, page text, or browser metadata by default.
+
+## Word writing assistant
+
+1. Start the backend, then in Word for Windows open **Home -> Add-ins -> More Add-ins -> My Add-ins -> Upload My Add-in**.
+2. Upload [system-agent/word-addin/manifest.xml](system-agent/word-addin/manifest.xml).
+3. In its task pane, paste your local `API_TOKEN`, select text, and choose **Analyze selected text**.
+
+The add-in is deliberately selection-based: it does not watch the document while you type. Selecting text produces a local rewrite, improvement note, extracted keywords, and optional related-document Chrome queries. The selected text is never sent to Chrome; only a query you choose is opened there.
 
 ## Configuration
 
@@ -76,11 +94,15 @@ Copying `.env.example` is unnecessary; `scripts/setup.*` maintains `.env`. Impor
 | `DATABASE_URL` | SQLite app DB | SQLAlchemy database URL. |
 | `API_TOKEN` | generated | Required local API token. |
 | `VITE_API_TOKEN` | same token | Dashboard token, consumed at Vite startup. |
+| `RATE_LIMIT_PER_MINUTE` | `600` | Per local client quota; sized for the dashboard, widget, watcher, and extension together. |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated allowed browser origins. |
 | `CAPTURE_ENABLED` | `false` | Enables the local state watcher only after explicit opt-in. |
 | `SNAPSHOT_RETENTION_DAYS` | `14` | Snapshot retention. |
 | `CONTENT_RETENTION_DAYS` | `30` | Notification/writing retention. |
 | `ALLOW_EXTERNAL_LLM` | `false` | Reserved explicit opt-in for future external LLM processing. |
+| `WEB_SEARCH_PROVIDER` | `chrome` | Opens explicit research queries in Google Chrome. |
+| `SUGGESTION_POLL_SECONDS` | `5` | How often the local planner checks the latest workspace state. |
+| `DOCUMENT_SUGGESTION_SECONDS` | `20` | Focus time before a recognised document offers related topics. |
 
 ## Running with Docker
 

@@ -38,6 +38,7 @@ echo "[+] Upgrading pip and installing Python dependencies..."
 pip install --quiet --upgrade pip
 pip install -r "$PROJECT_ROOT/backend/requirements.txt"
 pip install -r "$PROJECT_ROOT/system-agent/local-agent/requirements.txt"
+pip install -r "$PROJECT_ROOT/system-agent/floating-widget/requirements.txt"
 
 # 3. Database Initialization (demo data is intentionally opt-in)
 echo "[+] Initializing database schema..."

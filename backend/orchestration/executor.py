@@ -9,7 +9,7 @@ from backend.agents.task_agent import TaskAgent
 from backend.agents.web_agent import WebResearchAgent
 from backend.core.config import settings
 from backend.orchestration.planner import ExecutionPlan
-from backend.tools.browser_tool import open_url_in_browser
+from backend.tools.browser_tool import open_url_in_chrome
 from backend.tools.os_tool import open_desktop_app
 
 
@@ -44,7 +44,7 @@ class Executor:
         elif action == "task.list":
             result = self.task_agent.handle("show my tasks")
         elif action == "task.create":
-            result = self.task_agent.create_task(plan.arguments["title"])
+            result = self.task_agent.create_task(plan.arguments["title"], context=self.state_agent.get_latest_task_context())
         elif action == "task.complete":
             result = self.task_agent.complete_task(plan.arguments["task_id"])
         elif action == "web.research":
@@ -53,10 +53,12 @@ class Executor:
             launch = open_desktop_app(plan.arguments["app_id"])
             result = {"response": f"Opened {launch.get('app', 'the requested application')}." if launch.get("success") else launch.get("error", "Could not open application."), "browser_info": None, "tasks_created": [], "tool_result": launch}
         elif action == "browser.open_url":
-            success = open_url_in_browser(plan.arguments["url"])
+            success = open_url_in_chrome(plan.arguments["url"])
             result = {"response": "Opened the requested website." if success else "The URL was rejected or could not be opened.", "browser_info": None, "tasks_created": [], "tool_result": {"success": success}}
         elif action == "help":
             result = {"response": "I can safely inspect workspace context, manage tasks, research the web, open approved apps, summarize explicitly submitted writing, and organize notifications. Consequential actions require confirmation.", "tasks_created": [], "browser_info": None}
+        elif action == "conversation.respond":
+            result = {"response": plan.arguments.get("response", "I can help turn that into tasks, research, or a safe workspace action."), "tasks_created": [], "browser_info": None}
         else:
             state = plan.arguments.get("state") or {}
             app = state.get("active_app")

@@ -35,7 +35,7 @@ The user is the authority for consequential actions. LLM output, webpage content
 SQLite stores four structured models:
 
 - `state_snapshots`: app, window title, browser URL/title, capture time.
-- `tasks`: title, description, due date, `pending`/`ongoing`/`done` state.
+- `tasks`: title, description, due date, `pending`/`ongoing`/`done` state, plus the originating app/tab context for safe reopen navigation.
 - `notifications`: minimized source and summary; raw content is not returned by normal list calls.
 - `writing_suggestions`: explicitly submitted, redacted excerpts and local suggestions.
 

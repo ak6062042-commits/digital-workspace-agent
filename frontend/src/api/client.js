@@ -20,7 +20,10 @@ export const fetchTasks = (done = null) => request(`/tasks${done === null ? '' :
 export const createTask = (title, description = null, due_at = null, status = 'pending') => request('/tasks', { method: 'POST', body: JSON.stringify({ title, description, due_at, status }) });
 export const updateTask = (id, update) => request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(update) });
 export const toggleTask = (id, done) => updateTask(id, { done });
+export const navigateToTask = (id) => request(`/tasks/${id}/navigate`, { method: 'POST' });
+export const linkTaskToCurrentContext = (id) => request(`/tasks/${id}/link-current-context`, { method: 'POST' });
 export const fetchLatestSnapshot = () => request('/snapshot/latest');
+export const fetchWorkspaceOverview = () => request('/workspace/overview');
 export const fetchSnapshotDiff = (limit = 5) => request(`/snapshot/diff?limit=${limit}`);
 export const openBrowserUrl = (url) => request('/browser/open', { method: 'POST', body: JSON.stringify({ url }) });
 export const fetchNotifications = (reviewed = null) => request(`/notifications${reviewed === null ? '' : `?reviewed=${reviewed}`}`);

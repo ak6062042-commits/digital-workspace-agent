@@ -32,6 +32,10 @@ def main() -> None:
     # The previous MVP default exposed the backend on every interface. Migrate it safely.
     if values.get("BACKEND_HOST", "") in {"", "0.0.0.0"}:
         values["BACKEND_HOST"] = "127.0.0.1"
+    # Chrome is the supported visible search provider. Migrate the former
+    # default so an existing setup follows the current privacy/UX contract.
+    if values.get("WEB_SEARCH_PROVIDER", "").strip().lower() in {"", "duckduckgo"}:
+        values["WEB_SEARCH_PROVIDER"] = "chrome"
     output = []
     seen = set()
     for line in template_lines:

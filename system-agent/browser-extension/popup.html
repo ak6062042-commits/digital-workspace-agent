@@ -194,6 +194,21 @@
       background: rgba(255, 255, 255, 0.05);
       color: var(--text);
     }
+    .related-searches {
+      display: grid;
+      gap: 5px;
+      margin-top: 8px;
+    }
+    .related-searches:empty {
+      display: none;
+    }
+    .related-searches button {
+      width: 100%;
+      overflow: hidden;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .meta-footer {
       display: flex;
       justify-content: space-between;
@@ -243,16 +258,18 @@
       <span id="ai-btn-text">✨ Summarize Tab with AI</span>
     </button>
 
+    <button id="selection-btn" class="btn-task" style="margin-top:8px;">
+      <span>✦</span><span>Analyze selected text</span>
+    </button>
+
     <div id="ai-results" class="ai-results-box">
       <div id="ai-tag" class="category-tag">General Research</div>
       <div id="ai-summary" class="ai-summary-text">Analyzing page content...</div>
       <ul id="ai-takeaways" class="takeaways-list"></ul>
+      <div id="related-searches" class="related-searches"></div>
       <button id="add-task-btn" class="btn-task">
         <span>➕</span>
         <span id="task-btn-text">Add to Workspace Tasks</span>
-      </button>
-      <button id="selection-btn" class="btn-task" style="margin-top:6px;">
-        <span>✦</span><span>Analyze selected text</span>
       </button>
     </div>
   </div>

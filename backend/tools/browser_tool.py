@@ -4,6 +4,7 @@ import logging
 import subprocess
 import urllib.parse
 import webbrowser
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger("BrowserTool")
@@ -57,6 +58,29 @@ def open_url_in_browser(url: str, bring_to_front: bool = True) -> bool:
             return False
 
 
+def open_url_in_chrome(url: str, bring_to_front: bool = True) -> bool:
+    """Open a validated URL in Chrome when available, falling back to the default browser."""
+    if not url or not url.startswith(("http://", "https://")):
+        return False
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", "-a", "Google Chrome", url], shell=False)
+        elif sys.platform == "win32":
+            chrome_candidates = [
+                Path(os.environ.get("PROGRAMFILES", r"C:\\Program Files")) / "Google/Chrome/Application/chrome.exe",
+                Path(os.environ.get("PROGRAMFILES(X86)", r"C:\\Program Files (x86)")) / "Google/Chrome/Application/chrome.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+            ]
+            chrome_path = next((str(path) for path in chrome_candidates if path.is_file()), "chrome.exe")
+            subprocess.Popen([chrome_path, url], shell=False)
+        else:
+            subprocess.Popen(["google-chrome", url], shell=False)
+        logger.info("Opened URL in Chrome: %s", url)
+        return True
+    except OSError:
+        return open_url_in_browser(url, bring_to_front=bring_to_front)
+
+
 def search_in_browser(query: str, engine: str = "google", bring_to_front: bool = True) -> Dict[str, Any]:
     """
     Construct a live search URL and open it in the user's real desktop browser.
@@ -70,7 +94,7 @@ def search_in_browser(query: str, engine: str = "google", bring_to_front: bool =
     else:
         search_url = f"https://www.google.com/search?q={encoded_query}"
 
-    success = open_url_in_browser(search_url, bring_to_front=bring_to_front)
+    success = open_url_in_chrome(search_url, bring_to_front=bring_to_front)
     return {
         "success": success,
         "query": query,

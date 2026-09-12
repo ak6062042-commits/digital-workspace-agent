@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="TaskPaneApp">
+  <Id>2e4725d1-2d89-4d85-b0b6-6c47f6be1f58</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Digital Workspace Agent</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Workspace Writing Assistant" />
+  <Description DefaultValue="Explicitly analyze selected Word text with the local Workspace Agent." />
+  <IconUrl DefaultValue="http://localhost:8000/word-addin/icon.svg" />
+  <SupportUrl DefaultValue="http://localhost:8000/docs" />
+  <AppDomains><AppDomain>http://localhost:8000</AppDomain></AppDomains>
+  <Hosts><Host Name="Document" /></Hosts>
+  <DefaultSettings><SourceLocation DefaultValue="http://localhost:8000/word-addin/taskpane.html" /></DefaultSettings>
+  <Permissions>ReadDocument</Permissions>
+</OfficeApp>

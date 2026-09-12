@@ -1,10 +1,12 @@
 import re
+import urllib.parse
 import logging
 from typing import Dict, Any, List, Optional
 
 from backend.tools.search_tool import search_web
 from backend.tools.fetch_tool import fetch_webpage_content
 from backend.tools.browser_tool import search_in_browser, open_url_in_browser
+from backend.core.config import settings
 
 logger = logging.getLogger("WebResearchAgent")
 
@@ -65,12 +67,31 @@ class WebResearchAgent:
         browser_info = None
         if should_launch:
             try:
-                browser_info = search_in_browser(clean_query, engine="google", bring_to_front=True)
+                # Chrome is the visible search provider.  The local search helper
+                # still supplies compact sources for the in-app response.
+                engine = "google" if settings.web_search_provider == "chrome" else settings.web_search_provider
+                browser_info = search_in_browser(clean_query, engine=engine, bring_to_front=True)
                 logger.info("Launched live browser search for: %s", clean_query)
             except Exception as e:
                 logger.warning("Could not launch browser: %s", e)
 
-        # 2. Search web programmatically
+        # Chrome mode deliberately stops here. It is fast, avoids server-side
+        # browsing, and leaves result selection and reading to the user.
+        if settings.web_search_provider == "chrome":
+            response = (
+                f"Opened Google Chrome with the search query **{clean_query}**. No web pages were fetched or summarised by the agent."
+                if browser_info and browser_info.get("success")
+                else f"Prepared the Chrome search query **{clean_query}**, but Chrome could not be launched."
+            )
+            return {
+                "agent": "web_agent",
+                "response": response,
+                "search_results": [],
+                "browser_info": browser_info,
+                "tasks_created": [],
+            }
+
+        # Non-Chrome providers retain the legacy opt-in search/fetch path.
         search_results = search_web(clean_query, max_results=3)
 
         # 3. Extract content from top results
@@ -111,3 +132,12 @@ class WebResearchAgent:
             "browser_info": browser_info,
             "tasks_created": []
         }
+
+    @staticmethod
+    def related_document_queries(title: str) -> List[Dict[str, str]]:
+        """Build local query suggestions; Chrome only receives one after a user click."""
+        subject = re.sub(r"\s+[-|–—].*$", "", (title or "")).strip()[:160]
+        if not subject:
+            return []
+        topics = [f"{subject} documentation", f"{subject} examples", f"{subject} best practices"]
+        return [{"label": topic, "query": topic} for topic in topics]

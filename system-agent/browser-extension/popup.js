@@ -25,10 +25,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
   function renderSummary(data) {
     byId("ai-results").style.display = "block";
-    byId("ai-tag").textContent = data.work_context || "Local analysis";
-    byId("ai-summary").textContent = data.summary || data.suggestion_text || "No analysis returned.";
+    const isWritingImprovement = Boolean(data.suggestion_text);
+    byId("ai-tag").textContent = isWritingImprovement ? "Writing improvement" : (data.work_context || "Local analysis");
+    byId("ai-summary").textContent = data.suggestion_text || data.summary || "No analysis returned.";
     const list = byId("ai-takeaways"); list.replaceChildren();
-    (data.key_takeaways || []).forEach((item) => { const li = document.createElement("li"); li.textContent = item; list.appendChild(li); });
+    const takeaways = data.key_takeaways || (data.keywords?.length ? [`Keywords: ${data.keywords.join(", ")}`] : []);
+    takeaways.forEach((item) => { const li = document.createElement("li"); li.textContent = item; list.appendChild(li); });
+    const relatedSearches = byId("related-searches"); relatedSearches.replaceChildren();
+    (data.related_queries || []).forEach((topic) => {
+      if (!topic?.query) return;
+      const button = document.createElement("button");
+      button.type = "button"; button.className = "btn-sync";
+      button.textContent = `Search Chrome: ${topic.label || topic.query}`;
+      button.addEventListener("click", () => chrome.tabs.create({ url: `https://www.google.com/search?q=${encodeURIComponent(topic.query)}` }));
+      relatedSearches.appendChild(button);
+    });
     suggestedTask = data.suggested_task || "";
     byId("add-task-btn").style.display = suggestedTask ? "flex" : "none";
   }
@@ -51,7 +62,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     else setStatus(response?.error || "Analysis failed", true);
   });
   byId("selection-btn").addEventListener("click", async () => {
-    const response = await send("analyze_selection", { operation: "summarize" });
+    byId("selection-btn").disabled = true;
+    const originalText = byId("selection-btn").textContent;
+    byId("selection-btn").textContent = "Improving selected text...";
+    const response = await send("analyze_selection", { operation: "improve" });
+    byId("selection-btn").disabled = false;
+    byId("selection-btn").textContent = originalText;
     if (response?.success) { renderSummary(response.data); setStatus("Selection analyzed"); }
     else setStatus(response?.error || "Analysis failed", true);
   });

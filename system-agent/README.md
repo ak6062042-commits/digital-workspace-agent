@@ -25,10 +25,22 @@ Load `browser-extension` unpacked in a Chromium browser. The extension:
 - has no content script and does not observe text input;
 - requires a user-provided local API token in its popup;
 - optionally synchronizes active-tab metadata after the user enables that setting;
-- summarizes a page or analyzes selected text only after a user click.
+- summarizes a page or analyzes selected text only after a user click; selected-text analysis returns a rewrite, extracted keywords, and user-triggered related-document searches in Chrome.
 
 The extension has access to the active tab only for these explicit interactions. Do not enable state sync on a browser profile that contains workspaces you do not intend to store locally.
 
 ## Floating widget
 
-`floating-widget/widget.py` is an optional PyQt tray-like interface. Run it in an environment with `PyQt5` installed and `API_TOKEN` available. It is a client of the same authenticated API and does not create independent automation rules.
+`floating-widget/widget.py` is an optional, roomier PyQt command center. It displays the current permitted workspace metadata, active tasks, notifications, planner topics, and explicit writing improvements. Its chat field accepts requests such as **Open this tab**, **Open VS Code**, or **Research this current topic**; each goes through the same planner, allowlist, and confirmation policy as the dashboard. The watcher recognises this window and never stores it as `python.exe` workspace state.
+
+Run it after the backend is available:
+
+```powershell
+.venv\Scripts\python system-agent\floating-widget\widget.py
+```
+
+It is a client of the same authenticated API and does not create independent automation rules.
+
+## Word writing assistant
+
+`word-addin` is a local Word task-pane add-in. It sends only user-selected text after the **Analyze selected text** button is clicked. See [word-addin/README.md](word-addin/README.md) for sideloading instructions.

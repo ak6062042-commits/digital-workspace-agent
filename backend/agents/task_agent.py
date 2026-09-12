@@ -118,7 +118,13 @@ class TaskAgent:
             "tasks_modified": []
         }
 
-    def create_task(self, title: str, description: Optional[str] = None, due_date: Optional[datetime] = None) -> Dict[str, Any]:
+    def create_task(
+        self,
+        title: str,
+        description: Optional[str] = None,
+        due_date: Optional[datetime] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         clean_title = title.strip()[:255]
         if not clean_title:
             return {"response": "A task needs a title.", "tasks_created": [], "tasks_modified": []}
@@ -129,6 +135,9 @@ class TaskAgent:
                 done=False,
                 status="pending",
                 due_at=due_date,
+                source_url=(context or {}).get("browser_url") or None,
+                source_app=(context or {}).get("active_app") or None,
+                source_title=(context or {}).get("browser_tab_title") or (context or {}).get("active_window_title") or None,
             )
             session.add(new_task)
             session.commit()

@@ -30,6 +30,13 @@ def _bool(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _positive_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./backend/db/app.db")
@@ -38,13 +45,17 @@ class Settings:
     api_token: str = os.getenv("API_TOKEN", "")
     cors_origin: str = os.getenv("CORS_ORIGIN", "http://localhost:5173,http://127.0.0.1:5173")
     request_max_bytes: int = int(os.getenv("REQUEST_MAX_BYTES", "65536"))
-    rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "120"))
+    rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "600"))
     snapshot_retention_days: int = int(os.getenv("SNAPSHOT_RETENTION_DAYS", "14"))
     content_retention_days: int = int(os.getenv("CONTENT_RETENTION_DAYS", "30"))
     capture_enabled: bool = _bool("CAPTURE_ENABLED", False)
     allow_external_llm: bool = _bool("ALLOW_EXTERNAL_LLM", False)
     auto_execute_low_risk: bool = _bool("AUTO_EXECUTE_LOW_RISK", True)
     allow_container_bind: bool = _bool("ALLOW_CONTAINER_BIND", False)
+    web_search_provider: str = os.getenv("WEB_SEARCH_PROVIDER", "chrome").strip().lower()
+    suggestion_poll_seconds: int = _positive_int("SUGGESTION_POLL_SECONDS", 5)
+    document_suggestion_seconds: int = _positive_int("DOCUMENT_SUGGESTION_SECONDS", 20)
+    document_suggestion_cooldown_seconds: int = _positive_int("DOCUMENT_SUGGESTION_COOLDOWN_SECONDS", 120)
 
     @property
     def cors_origins(self) -> list[str]:

@@ -24,6 +24,8 @@ ENV/
 *.sqlite3
 backend/db/*.db
 backend/db/*.sqlite3
+backend/db/*.db-shm
+backend/db/*.db-wal
 
 node_modules/
 dist/

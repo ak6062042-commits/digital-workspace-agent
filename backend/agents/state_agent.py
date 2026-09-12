@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlparse
 
 from backend.db.db import get_session
 from backend.db.models import StateSnapshot
@@ -39,6 +40,36 @@ class DigitalStateAgent:
                 .first()
             )
             return snap.to_dict() if snap else None
+
+    @staticmethod
+    def _is_agent_control_surface(snapshot: StateSnapshot) -> bool:
+        """Do not bind tasks to the dashboard, Word add-in, or PyQt widget."""
+        url = snapshot.browser_url or ""
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        app = (snapshot.active_app or "").lower()
+        title = (snapshot.active_window_title or "").lower()
+        return (
+            (host in {"localhost", "127.0.0.1"} and (parsed.port == 5173 or parsed.path.startswith("/word-addin")))
+            or ("python" in app and "digital workspace command center" in title)
+        )
+
+    def get_latest_task_context(self) -> Optional[Dict[str, Any]]:
+        """Return the latest real app/tab, skipping the agent's own UI surfaces."""
+        with get_session() as session:
+            snapshots = (
+                session.query(StateSnapshot)
+                .order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc())
+                .limit(20)
+                .all()
+            )
+            for snapshot in snapshots:
+                if not self._is_agent_control_surface(snapshot):
+                    return snapshot.to_dict()
+        # Do not fall back to the dashboard/widget when it is the only recent
+        # state.  Saving that URL would make a task reopen the agent instead of
+        # the user's actual work.
+        return None
 
     def diff_snapshots(self, limit: int = 5) -> Dict[str, Any]:
         """

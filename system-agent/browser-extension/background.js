@@ -73,7 +73,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         const [{ result: selection }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractSelection });
         if (!selection.text) throw new Error("Select text on the page first. Nothing is captured automatically.");
-        const data = await apiFetch("/writing/analyze", { method: "POST", body: JSON.stringify({ ...selection, operation: request.operation || "summarize", consent: true }) });
+        const data = await apiFetch("/writing/analyze", { method: "POST", body: JSON.stringify({ ...selection, operation: request.operation || "improve", consent: true }) });
         sendResponse({ success: true, data }); return;
       }
       sendResponse({ success: false, error: "Unknown action" });

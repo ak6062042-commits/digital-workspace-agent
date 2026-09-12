@@ -36,7 +36,10 @@ async def require_api_token(
     if not hmac.compare_digest(supplied, settings.api_token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Valid X-Workspace-Token required")
     client = request.client.host if request.client else "unknown"
-    limiter.check(client)
+    # Local clients share the loopback IP. Keep independent dashboard,
+    # widget, watcher, and extension traffic from starving each other.
+    client_kind = request.headers.get("user-agent", "local-client")[:120]
+    limiter.check(f"{client}:{client_kind}")
 
 
 async def limit_request_size(request: Request, call_next):

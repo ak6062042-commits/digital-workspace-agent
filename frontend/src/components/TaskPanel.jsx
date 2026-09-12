@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { SlidersHorizontal, Plus, Calendar, CheckCircle2 } from 'lucide-react';
+import { SlidersHorizontal, Plus, Calendar, CheckCircle2, ExternalLink } from 'lucide-react';
 
-export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask }) {
+export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, onNavigateTask, onLinkTask }) {
   const [filter, setFilter] = useState('active'); // 'all' | 'active' | 'completed'
   const [newTitle, setNewTitle] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -103,14 +103,17 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask }
                 className="checkbox-hf"
               />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: '12.5px',
-                  fontWeight: 500,
-                  color: task.done ? 'var(--hf-text-muted)' : 'var(--hf-text-primary)',
-                  textDecoration: task.done ? 'line-through' : 'none'
-                }}>
-                  {task.title}
-                </div>
+                <button
+                  type="button"
+                  disabled={!task.has_context}
+                  onClick={() => onNavigateTask(task.id)}
+                  title={task.has_context ? `Open ${task.source_title || task.source_app || 'saved workspace context'}` : 'This older task has no saved workspace context.'}
+                  style={{ background: 'none', border: 0, padding: 0, cursor: task.has_context ? 'pointer' : 'default', textAlign: 'left', display: 'flex', gap: 5, alignItems: 'center', fontSize: '12.5px', fontWeight: 500, color: task.done ? 'var(--hf-text-muted)' : 'var(--hf-text-primary)', textDecoration: task.done ? 'line-through' : 'none' }}
+                >
+                  <span>{task.title}</span>{task.has_context && <ExternalLink size={11} color="var(--hf-lime)" />}
+                </button>
+                {task.has_context && <div style={{ fontSize: '10px', color: 'var(--hf-text-muted)', marginTop: '2px' }}>Open context: {task.source_title || task.source_app}</div>}
+                {!task.has_context && <button type="button" className="btn-hf-ghost" onClick={() => onLinkTask(task.id)} style={{ marginTop: '3px', padding: '2px 5px', fontSize: '10px' }}>Link current app/tab</button>}
                 {task.due_at && (
                   <div style={{ fontSize: '10px', color: 'var(--hf-lime)', fontFamily: 'var(--font-mono)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Calendar size={10} />

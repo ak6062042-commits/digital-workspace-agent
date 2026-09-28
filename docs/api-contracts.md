@@ -23,7 +23,9 @@ The health endpoint is intentionally the only unauthenticated endpoint.
 | `GET` | `/api/snapshot/history?limit=20` | Retained snapshot history. |
 | `DELETE` | `/api/snapshot/history` | Delete all state history. |
 
-`POST /api/snapshot` accepts `active_app`, `active_window_title`, `browser_url`, `browser_tab_title`, and optional `captured_at`. Each field is length bounded and raw screenshots are not accepted.
+`POST /api/snapshot` accepts `active_app`, `active_window_title`, `browser_url`, `browser_tab_title`, and optional `captured_at`. Each field is length bounded and raw screenshots are not accepted. Undeclared fields are rejected. Stored URLs exclude credentials, fragments, and secret-bearing query parameters; identical near-simultaneous reports return `status: "duplicate"`.
+
+Collection endpoints support `limit` (1-100, default 50). `/api/workspace/overview` returns up to `OVERVIEW_ITEMS_LIMIT` rows per collection plus total counts, so dashboard polling remains bounded.
 
 ## Planner and executor
 

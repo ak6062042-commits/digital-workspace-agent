@@ -36,6 +36,10 @@ def main() -> None:
     # default so an existing setup follows the current privacy/UX contract.
     if values.get("WEB_SEARCH_PROVIDER", "").strip().lower() in {"", "duckduckgo"}:
         values["WEB_SEARCH_PROVIDER"] = "chrome"
+    # The watcher now uses the authenticated API exclusively. Migrate the old
+    # bypass default so setup does not preserve an obsolete direct-write path.
+    if values.get("DIRECT_DB_FALLBACK", "").strip().lower() in {"", "true", "1", "yes"}:
+        values["DIRECT_DB_FALLBACK"] = "false"
     output = []
     seen = set()
     for line in template_lines:

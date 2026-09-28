@@ -14,6 +14,7 @@ export function StatusIndicator({ snapshot, onRefresh, onTriggerDiff }) {
   const activeWindow = snapshot?.active_window_title || 'No active window reported';
   const browserUrl = snapshot?.browser_url;
   const browserTitle = snapshot?.browser_tab_title;
+  const snapshotTime = snapshot?.captured_at ? new Date(snapshot.captured_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'waiting';
 
   return (
     <div className="inspector-card">
@@ -36,7 +37,7 @@ export function StatusIndicator({ snapshot, onRefresh, onTriggerDiff }) {
             border: '1px solid rgba(0, 240, 118, 0.25)'
           }}>
             <span className="pulse-dot-hf"></span>
-            <span>LIVE 60FPS</span>
+            <span>SYNC {snapshotTime}</span>
           </div>
           <button
             onClick={handleRefresh}

@@ -1,17 +1,30 @@
 const API_BASE = '/api';
 const token = import.meta.env.VITE_API_TOKEN || '';
+const REQUEST_TIMEOUT_MS = 10_000;
 
 async function request(path, options = {}) {
   if (!token) throw new Error('VITE_API_TOKEN is not configured. Run the setup script and restart Vite.');
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', 'X-Workspace-Token': token, ...(options.headers || {}) },
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed with HTTP ${response.status}`);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      signal: options.signal || controller.signal,
+      headers: { 'Content-Type': 'application/json', 'X-Workspace-Token': token, ...(options.headers || {}) },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed with HTTP ${response.status}`);
+    }
+    return response.status === 204 ? null : response.json();
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('The local agent did not respond within 10 seconds. Check that the backend is running.');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-  return response.status === 204 ? null : response.json();
 }
 
 export const sendMessage = (message, session_id = 'default_session', include_state = true) => request('/chat', { method: 'POST', body: JSON.stringify({ message, session_id, include_state }) });

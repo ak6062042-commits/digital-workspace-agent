@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import declarative_base
 
+from backend.core.privacy import safe_excerpt, sanitize_workspace_url
+
 Base = declarative_base()
 
 REOPENABLE_APP_NAMES = {
@@ -43,9 +45,10 @@ class Task(Base):
         # A historical task may have been created while the agent dashboard was
         # focused.  It must be relinked, even though "Google Chrome" itself is
         # normally a launchable application.
-        dashboard_context = _is_agent_dashboard_url(self.source_url)
+        source_url = sanitize_workspace_url(self.source_url)
+        dashboard_context = _is_agent_dashboard_url(source_url)
         has_context = not dashboard_context and bool(
-            (self.source_url or "").startswith(("http://", "https://"))
+            source_url
             or (self.source_app or "").strip().lower() in REOPENABLE_APP_NAMES
         )
         return {
@@ -57,9 +60,9 @@ class Task(Base):
             "due_at": self.due_at.isoformat() if self.due_at else None,
             "status": "done" if self.done else (self.status or "pending"),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "source_url": self.source_url,
+            "source_url": source_url,
             "source_app": self.source_app,
-            "source_title": self.source_title,
+            "source_title": safe_excerpt(self.source_title or "", 500) or None,
             "has_context": has_context,
         }
 
@@ -77,10 +80,10 @@ class StateSnapshot(Base):
     def to_dict(self):
         return {
             "id": self.id,
-            "active_app": self.active_app,
-            "active_window_title": self.active_window_title,
-            "browser_url": self.browser_url,
-            "browser_tab_title": self.browser_tab_title,
+            "active_app": safe_excerpt(self.active_app or "", 255) or None,
+            "active_window_title": safe_excerpt(self.active_window_title or "", 500) or None,
+            "browser_url": sanitize_workspace_url(self.browser_url),
+            "browser_tab_title": safe_excerpt(self.browser_tab_title or "", 500) or None,
             "captured_at": self.captured_at.isoformat() if self.captured_at else None,
         }
 
@@ -123,8 +126,8 @@ class WritingSuggestion(Base):
             research = {}
         return {
             "id": self.id,
-            "source_url": self.source_url,
-            "source_title": self.source_title,
+            "source_url": sanitize_workspace_url(self.source_url),
+            "source_title": safe_excerpt(self.source_title or "", 500) or None,
             "excerpt": self.excerpt,
             "suggestion_text": self.suggestion_text,
             "keywords": research.get("keywords", []),

@@ -29,7 +29,7 @@ API_TOKEN = os.getenv("API_TOKEN", "")
 # Watcher Configuration
 POLL_INTERVAL = float(os.getenv("AGENT_POLL_INTERVAL", "3.0"))  # Seconds between checks
 FORCE_HEARTBEAT_INTERVAL = float(os.getenv("AGENT_HEARTBEAT_INTERVAL", "30.0"))  # Send even if unchanged
-DIRECT_DB_FALLBACK = os.getenv("DIRECT_DB_FALLBACK", "true").lower() in ("true", "1", "yes")
+DIRECT_DB_FALLBACK = os.getenv("DIRECT_DB_FALLBACK", "false").lower() in ("true", "1", "yes")
 CAPTURE_ENABLED = os.getenv("CAPTURE_ENABLED", "false").lower() in ("true", "1", "yes")
 
 # OS Platform Identification

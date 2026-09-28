@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 
+from backend.core.privacy import safe_excerpt, sanitize_workspace_url
 from backend.db.db import get_session
 from backend.db.models import StateSnapshot
 
@@ -97,11 +98,12 @@ class DigitalStateAgent:
 
             changes = []
             if curr.active_app != prev.active_app:
-                changes.append(f"Switched app from **{prev.active_app or 'Unknown'}** to **{curr.active_app or 'Unknown'}**")
+                changes.append(f"Switched app from **{safe_excerpt(prev.active_app or '', 255) or 'Unknown'}** to **{safe_excerpt(curr.active_app or '', 255) or 'Unknown'}**")
             if curr.active_window_title != prev.active_window_title:
-                changes.append(f"Window changed to *\"{curr.active_window_title or 'Untitled'}\"*")
-            if curr.browser_url != prev.browser_url and curr.browser_url:
-                changes.append(f"Navigated browser to `{curr.browser_url}`")
+                changes.append(f"Window changed to *\"{safe_excerpt(curr.active_window_title or '', 500) or 'Untitled'}\"*")
+            current_url = sanitize_workspace_url(curr.browser_url)
+            if current_url != sanitize_workspace_url(prev.browser_url) and current_url:
+                changes.append(f"Navigated browser to `{current_url}`")
 
             if changes:
                 transitions.append({

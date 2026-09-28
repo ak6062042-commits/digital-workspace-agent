@@ -71,6 +71,20 @@ class PlannerScheduler:
     def get_suggestions(self) -> List[Dict[str, Any]]:
         return [s for s in self._suggestions if not s["dismissed"]]
 
+    def _trim_memory(self) -> None:
+        if len(self._contexts) > settings.planner_context_limit:
+            removable = sorted(
+                (key for key in self._contexts if key != self._current_key),
+                key=lambda key: self._contexts[key]["started_at"],
+            )
+            for key in removable[: len(self._contexts) - settings.planner_context_limit]:
+                self._contexts.pop(key, None)
+        if len(self._suggestions) > settings.planner_suggestion_limit:
+            self._suggestions = [suggestion for suggestion in self._suggestions if not suggestion["dismissed"]]
+            overflow = len(self._suggestions) - settings.planner_suggestion_limit
+            if overflow > 0:
+                self._suggestions = self._suggestions[overflow:]
+
     def dismiss_suggestion(self, suggestion_id: int) -> bool:
         for s in self._suggestions:
             if s["id"] == suggestion_id:
@@ -111,6 +125,7 @@ class PlannerScheduler:
                     "left_at": None,
                     "task_created": False,
                 }
+                self._trim_memory()
             else:
                 self._contexts[key]["left_at"] = None  # resumed
             self._current_key = key
@@ -173,6 +188,7 @@ class PlannerScheduler:
             "created_at": datetime.utcnow().isoformat(),
             "dismissed": False,
         })
+        self._trim_memory()
         logger.info("Proposed task for unattended context: %s", ctx["title"])
 
     def _trigger_web_suggestion(self, snapshot: StateSnapshot):
@@ -191,6 +207,7 @@ class PlannerScheduler:
             "created_at": datetime.utcnow().isoformat(),
             "dismissed": False,
         })
+        self._trim_memory()
 
     def _set_decision(self, decision: str):
         self._last_decision = decision

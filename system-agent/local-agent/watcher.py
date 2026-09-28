@@ -12,7 +12,7 @@ try:
 except ImportError:
     requests = None
 
-# Ensure project root is in sys.path for direct DB fallback
+# Keep project root importable when this script is launched directly.
 LOCAL_AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(LOCAL_AGENT_DIR, "..", ".."))
 if PROJECT_ROOT not in sys.path:
@@ -50,6 +50,7 @@ logger = logging.getLogger("LocalAgentWatcher")
 
 WIDGET_WINDOW_MARKER = "digital workspace command center"
 WIDGET_PROCESS_NAMES = {"python.exe", "pythonw.exe", "python", "pythonw"}
+SNAPSHOT_API_FIELDS = ("active_app", "active_window_title", "browser_url", "browser_tab_title", "captured_at")
 
 
 def is_workspace_widget_snapshot(snapshot: Dict[str, Any]) -> bool:
@@ -64,65 +65,33 @@ def is_workspace_widget_snapshot(snapshot: Dict[str, Any]) -> bool:
     return app in WIDGET_PROCESS_NAMES and WIDGET_WINDOW_MARKER in title
 
 
-def save_to_database_directly(snapshot: Dict[str, Any]) -> bool:
-    """Fallback: write the state snapshot directly to the SQLite database."""
-    try:
-        from backend.db.db import get_session, init_db
-        from backend.db.models import StateSnapshot
-
-        init_db()
-        with get_session() as session:
-            # Parse captured_at to datetime object if string
-            captured_at_val = snapshot.get("captured_at")
-            if isinstance(captured_at_val, str):
-                try:
-                    captured_at_dt = datetime.fromisoformat(captured_at_val.replace("Z", "+00:00"))
-                except Exception:
-                    captured_at_dt = datetime.utcnow()
-            else:
-                captured_at_dt = datetime.utcnow()
-
-            snap_record = StateSnapshot(
-                active_app=snapshot.get("active_app"),
-                active_window_title=snapshot.get("active_window_title"),
-                browser_url=snapshot.get("browser_url"),
-                browser_tab_title=snapshot.get("browser_tab_title"),
-                captured_at=captured_at_dt,
-            )
-            session.add(snap_record)
-            session.commit()
-            session.refresh(snap_record)
-            logger.info("Saved snapshot directly to SQLite (ID: %s)", snap_record.id)
-            return True
-    except Exception as e:
-        logger.warning("Direct DB fallback failed: %s", e)
-        return False
+def snapshot_api_payload(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """Send only fields declared by the backend snapshot contract."""
+    return {field: snapshot.get(field) for field in SNAPSHOT_API_FIELDS}
 
 
 def post_snapshot(snapshot: Dict[str, Any], backend_url: str = BACKEND_API_URL) -> bool:
     """Send state snapshot to the backend API via HTTP POST."""
     if requests is None:
         logger.warning("'requests' library is not installed.")
-        if DIRECT_DB_FALLBACK:
-            return save_to_database_directly(snapshot)
         return False
 
     try:
         headers = {"Content-Type": "application/json", "X-Workspace-Token": API_TOKEN}
         if not API_TOKEN:
             logger.error("API_TOKEN is not configured; refusing to send workspace metadata over HTTP.")
-            return save_to_database_directly(snapshot) if DIRECT_DB_FALLBACK else False
-        response = requests.post(backend_url, json=snapshot, headers=headers, timeout=2.5)
+            return False
+        response = requests.post(backend_url, json=snapshot_api_payload(snapshot), headers=headers, timeout=2.5)
         if response.status_code in (200, 201):
             logger.info("Successfully posted snapshot to backend: %s", response.status_code)
             return True
         else:
             logger.warning("Backend returned HTTP %s: %s", response.status_code, response.text)
     except Exception as exc:
-        logger.info("Backend unreachable (%s). Using fallback if enabled.", exc)
+        logger.info("Backend unreachable (%s). Snapshot was not persisted.", exc)
 
     if DIRECT_DB_FALLBACK:
-        return save_to_database_directly(snapshot)
+        logger.warning("DIRECT_DB_FALLBACK is no longer supported; the snapshot was not saved outside the authenticated API.")
 
     return False
 

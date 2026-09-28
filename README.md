@@ -11,6 +11,7 @@ The project is designed to assist with workspace context, tasks, research, expli
 ## What is implemented
 
 - Workspace state snapshots, history, retention, and context diffs.
+- Privacy-minimized state: URL credentials, fragments, and sensitive query parameters are removed before state is stored or returned.
 - Deterministic State -> Plan -> Validate -> Execute orchestration.
 - Task management with `pending`, `ongoing`, and user-confirmed `done` states.
 - Fast Chrome research: explicit searches open as a query in Google Chrome; the backend does not scrape or summarise result pages.
@@ -27,6 +28,7 @@ The project is designed to assist with workspace context, tasks, research, expli
 - The browser extension has **no content script** and never records typing. It can summarize a page or analyze selected text only after a click.
 - Local state collection is disabled until `CAPTURE_ENABLED=true` is set.
 - The planner never auto-creates tasks or performs background web research. It proposes assistance instead.
+- Voice recognition only fills the command composer; a user must review and send the command before it reaches the planner.
 - The app launcher never passes user input to a shell and rejects unknown applications.
 - Browser/LLM content processing requires explicit consent; external LLM processing is disabled by default.
 
@@ -96,6 +98,7 @@ Copying `.env.example` is unnecessary; `scripts/setup.*` maintains `.env`. Impor
 | `VITE_API_TOKEN` | same token | Dashboard token, consumed at Vite startup. |
 | `RATE_LIMIT_PER_MINUTE` | `600` | Per local client quota; sized for the dashboard, widget, watcher, and extension together. |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated allowed browser origins. |
+| `ALLOWED_HOSTS` | loopback hosts | Comma-separated Host-header allowlist for the local API. |
 | `CAPTURE_ENABLED` | `false` | Enables the local state watcher only after explicit opt-in. |
 | `SNAPSHOT_RETENTION_DAYS` | `14` | Snapshot retention. |
 | `CONTENT_RETENTION_DAYS` | `30` | Notification/writing retention. |
@@ -103,6 +106,12 @@ Copying `.env.example` is unnecessary; `scripts/setup.*` maintains `.env`. Impor
 | `WEB_SEARCH_PROVIDER` | `chrome` | Opens explicit research queries in Google Chrome. |
 | `SUGGESTION_POLL_SECONDS` | `5` | How often the local planner checks the latest workspace state. |
 | `DOCUMENT_SUGGESTION_SECONDS` | `20` | Focus time before a recognised document offers related topics. |
+| `SNAPSHOT_DEDUP_SECONDS` | `5` | Collapses identical near-simultaneous state reports. |
+| `OVERVIEW_ITEMS_LIMIT` | `50` | Maximum rows per collection returned by each dashboard refresh. |
+| `PLANNER_CONTEXT_LIMIT` | `100` | Maximum in-memory contexts retained by the background planner. |
+| `PLANNER_SUGGESTION_LIMIT` | `50` | Maximum in-memory planner suggestions retained. |
+
+`DIRECT_DB_FALLBACK` is retained only to make legacy configuration harmless. The watcher no longer writes to SQLite directly: if the authenticated local API is unavailable, it drops that snapshot and logs the reason.
 
 ## Running with Docker
 

@@ -41,6 +41,11 @@ def init_db():
             connection.execute(text("ALTER TABLE tasks ADD COLUMN source_app VARCHAR(255)"))
         if "source_title" not in columns:
             connection.execute(text("ALTER TABLE tasks ADD COLUMN source_title VARCHAR(500)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_state_snapshots_captured_at ON state_snapshots (captured_at DESC, id DESC)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_created_at ON tasks (created_at DESC, id DESC)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_status ON tasks (status, done)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_reviewed_created_at ON notifications (reviewed, created_at DESC, id DESC)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_writing_suggestions_reviewed_created_at ON writing_suggestions (reviewed, created_at DESC, id DESC)"))
     _backfill_task_contexts()
 
 
@@ -77,5 +82,8 @@ def get_session():
     session = SessionLocal()
     try:
         yield session
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()

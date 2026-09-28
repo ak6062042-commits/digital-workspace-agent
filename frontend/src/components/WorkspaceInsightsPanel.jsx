@@ -9,8 +9,11 @@ export function WorkspaceInsightsPanel({ notifications, writingSuggestions, plan
     event.preventDefault();
     if (!text.trim()) return;
     setBusy(true);
-    await onAnalyzeWriting(text.trim(), operation);
-    setText(''); setBusy(false);
+    try {
+      if (await onAnalyzeWriting(text.trim(), operation)) setText('');
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <>

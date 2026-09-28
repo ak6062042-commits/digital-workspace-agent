@@ -9,12 +9,13 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import delete
 
 from backend.core.config import settings
-from backend.core.privacy import redact_sensitive_text, safe_excerpt
+from backend.core.privacy import redact_sensitive_text, safe_excerpt, sanitize_workspace_url
 from backend.core.security import limit_request_size, require_api_token
 from backend.coordinator.router import coordinator
 from backend.coordinator.scheduler import PlannerScheduler
@@ -26,23 +27,26 @@ from backend.tools.os_tool import list_allowed_apps, normalize_app_id, open_desk
 planner_scheduler = PlannerScheduler(coordinator)
 
 
-class SnapshotCreateRequest(BaseModel):
+class RequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SnapshotCreateRequest(RequestModel):
     active_app: str | None = Field(default=None, max_length=255)
     active_window_title: str | None = Field(default=None, max_length=500)
     browser_url: str | None = Field(default=None, max_length=1000)
     browser_tab_title: str | None = Field(default=None, max_length=500)
     captured_at: datetime | None = None
-    metadata: dict[str, Any] | None = None
 
 
-class TaskCreateRequest(BaseModel):
+class TaskCreateRequest(RequestModel):
     title: str = Field(min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=4000)
     due_at: datetime | None = None
     status: Literal["pending", "ongoing"] = "pending"
 
 
-class TaskUpdateRequest(BaseModel):
+class TaskUpdateRequest(RequestModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, max_length=4000)
     done: bool | None = None
@@ -50,34 +54,34 @@ class TaskUpdateRequest(BaseModel):
     due_at: datetime | None = None
 
 
-class ChatRequest(BaseModel):
+class ChatRequest(RequestModel):
     message: str = Field(min_length=1, max_length=4000)
     session_id: str = Field(default="default_session", min_length=1, max_length=128)
     include_state: bool = True
 
 
-class ConfirmationRequest(BaseModel):
+class ConfirmationRequest(RequestModel):
     approved: bool
 
 
-class BrowserOpenRequest(BaseModel):
+class BrowserOpenRequest(RequestModel):
     url: HttpUrl
 
 
-class BrowserSummarizeRequest(BaseModel):
+class BrowserSummarizeRequest(RequestModel):
     url: HttpUrl
     title: str = Field(default="Web Page", max_length=500)
     content: str = Field(min_length=1, max_length=4000)
     consent: bool = False
 
 
-class NotificationIngestRequest(BaseModel):
+class NotificationIngestRequest(RequestModel):
     source: str = Field(default="unknown", max_length=255)
     title: str = Field(min_length=1, max_length=500)
     content: str = Field(default="", max_length=2000)
 
 
-class WritingAnalyzeRequest(BaseModel):
+class WritingAnalyzeRequest(RequestModel):
     url: str | None = Field(default=None, max_length=1000)
     title: str = Field(default="Untitled", max_length=500)
     text: str = Field(min_length=1, max_length=2000)
@@ -85,8 +89,31 @@ class WritingAnalyzeRequest(BaseModel):
     consent: bool = False
 
 
-class AppLaunchRequest(BaseModel):
+class AppLaunchRequest(RequestModel):
     app_id: str = Field(min_length=1, max_length=32)
+
+
+def _naive_utc(value: datetime | None) -> datetime:
+    value = value or datetime.now(timezone.utc)
+    if value.tzinfo is not None:
+        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _clean_snapshot(payload: SnapshotCreateRequest) -> dict[str, Any]:
+    browser_url = sanitize_workspace_url(payload.browser_url)
+    if payload.browser_url and not browser_url:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="browser_url must be an HTTP(S) URL")
+    return {
+        "active_app": safe_excerpt(payload.active_app or "", 255) or None,
+        "active_window_title": safe_excerpt(payload.active_window_title or "", 500) or None,
+        "browser_url": browser_url,
+        "browser_tab_title": safe_excerpt(payload.browser_tab_title or "", 500) or None,
+    }
+
+
+def _snapshot_matches(snapshot: StateSnapshot, values: dict[str, Any]) -> bool:
+    return all(getattr(snapshot, key) == value for key, value in values.items())
 
 
 def _prune_expired_data() -> None:
@@ -116,6 +143,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "X-Workspace-Token"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 app.middleware("http")(limit_request_size)
 app.mount("/word-addin", StaticFiles(directory="system-agent/word-addin"), name="word-addin")
 
@@ -140,15 +168,13 @@ def confirm_action(confirmation_id: str, payload: ConfirmationRequest):
 
 @api.post("/snapshot", status_code=status.HTTP_201_CREATED)
 def create_state_snapshot(payload: SnapshotCreateRequest):
-    captured_at = payload.captured_at or datetime.utcnow()
+    values = _clean_snapshot(payload)
+    captured_at = _naive_utc(payload.captured_at)
     with get_session() as session:
-        snapshot = StateSnapshot(
-            active_app=payload.active_app,
-            active_window_title=payload.active_window_title,
-            browser_url=payload.browser_url,
-            browser_tab_title=payload.browser_tab_title,
-            captured_at=captured_at,
-        )
+        latest = session.query(StateSnapshot).order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc()).first()
+        if latest and _snapshot_matches(latest, values) and abs((captured_at - _naive_utc(latest.captured_at)).total_seconds()) <= settings.snapshot_dedup_seconds:
+            return {"status": "duplicate", "snapshot": latest.to_dict()}
+        snapshot = StateSnapshot(**values, captured_at=captured_at)
         session.add(snapshot)
         session.commit()
         session.refresh(snapshot)
@@ -165,11 +191,12 @@ def get_latest_state_snapshot():
 @api.get("/workspace/overview")
 def workspace_overview():
     """One bounded read for the dashboard/widget, avoiding noisy polling bursts."""
+    item_limit = min(settings.overview_items_limit, 100)
     with get_session() as session:
         snapshot = session.query(StateSnapshot).order_by(StateSnapshot.captured_at.desc(), StateSnapshot.id.desc()).first()
-        tasks = session.query(Task).order_by(Task.created_at.desc()).all()
-        notifications = session.query(Notification).filter(Notification.reviewed == False).order_by(Notification.created_at.desc()).all()
-        writing = session.query(WritingSuggestion).filter(WritingSuggestion.reviewed == False).order_by(WritingSuggestion.created_at.desc()).all()
+        tasks = session.query(Task).order_by(Task.created_at.desc()).limit(item_limit).all()
+        notifications = session.query(Notification).filter(Notification.reviewed == False).order_by(Notification.created_at.desc()).limit(item_limit).all()
+        writing = session.query(WritingSuggestion).filter(WritingSuggestion.reviewed == False).order_by(WritingSuggestion.created_at.desc()).limit(item_limit).all()
         return {
             "snapshot": snapshot.to_dict() if snapshot else None,
             "tasks": [task.to_dict() for task in tasks],
@@ -177,6 +204,13 @@ def workspace_overview():
             "writing_suggestions": [item.to_dict() for item in writing],
             "planner": {"status": planner_scheduler.get_status(), "suggestions": planner_scheduler.get_suggestions()},
             "settings": _public_settings(),
+            "counts": {
+                "tasks": session.query(Task).count(),
+                "active_tasks": session.query(Task).filter(Task.done == False).count(),
+                "notifications": session.query(Notification).filter(Notification.reviewed == False).count(),
+                "writing_suggestions": session.query(WritingSuggestion).filter(WritingSuggestion.reviewed == False).count(),
+            },
+            "item_limit": item_limit,
         }
 
 
@@ -201,14 +235,14 @@ def delete_snapshot_history():
 
 
 @api.get("/tasks")
-def list_tasks(done: bool | None = None, task_status: Literal["pending", "ongoing", "done"] | None = None):
+def list_tasks(done: bool | None = None, task_status: Literal["pending", "ongoing", "done"] | None = None, limit: int = Query(50, ge=1, le=100)):
     with get_session() as session:
         query = session.query(Task)
         if done is not None:
             query = query.filter(Task.done == done)
         if task_status:
             query = query.filter(Task.status == task_status)
-        return [task.to_dict() for task in query.order_by(Task.created_at.desc()).all()]
+        return [task.to_dict() for task in query.order_by(Task.created_at.desc()).limit(limit).all()]
 
 
 @api.post("/tasks", status_code=status.HTTP_201_CREATED)
@@ -238,7 +272,7 @@ def navigate_to_task_context(task_id: int):
         task = session.get(Task, task_id)
         if not task:
             raise HTTPException(status_code=404, detail="Task not found")
-        source_url, source_app, source_title = task.source_url, task.source_app, task.source_title
+        source_url, source_app, source_title = sanitize_workspace_url(task.source_url), task.source_app, task.source_title
     if _is_agent_dashboard_url(source_url):
         raise HTTPException(status_code=409, detail="This task was linked to the agent dashboard, not its original work. Focus the correct app or tab and choose Link current app/tab.")
     if source_url and source_url.startswith(("https://", "http://")):
@@ -318,13 +352,14 @@ def open_browser(payload: BrowserOpenRequest):
 def summarize_browser_tab(payload: BrowserSummarizeRequest):
     if not payload.consent:
         raise HTTPException(status_code=403, detail="Explicit content consent is required")
+    title = safe_excerpt(payload.title, 500) or "Web Page"
     clean_text = redact_sensitive_text(payload.content, limit=4000)
     sentences = [part.strip() for part in clean_text.replace("\n", " ").split(".") if len(part.strip()) > 20]
-    summary = ". ".join(sentences[:2]) or f"Reviewing {payload.title}."
+    summary = ". ".join(sentences[:2]) or f"Reviewing {title}."
     return {
         "success": True,
-        "url": str(payload.url),
-        "title": payload.title,
+        "url": sanitize_workspace_url(str(payload.url)),
+        "title": title,
         "work_context": "Explicit browser-page summary",
         "summary": summary,
         "key_takeaways": sentences[2:5] or ["No additional local takeaways were identified."],
@@ -396,8 +431,8 @@ def analyze_writing(payload: WritingAnalyzeRequest):
     research_topics = _writing_research_topics(redacted, payload.title)
     with get_session() as session:
         suggestion = WritingSuggestion(
-            source_url=payload.url,
-            source_title=payload.title,
+            source_url=sanitize_workspace_url(payload.url),
+            source_title=safe_excerpt(payload.title, 500),
             excerpt=safe_excerpt(redacted),
             suggestion_text=suggestion_text,
             related_links=json.dumps(research_topics),
@@ -410,12 +445,12 @@ def analyze_writing(payload: WritingAnalyzeRequest):
 
 
 @api.get("/writing/suggestions")
-def list_writing_suggestions(reviewed: bool | None = None):
+def list_writing_suggestions(reviewed: bool | None = None, limit: int = Query(50, ge=1, le=100)):
     with get_session() as session:
         query = session.query(WritingSuggestion)
         if reviewed is not None:
             query = query.filter(WritingSuggestion.reviewed == reviewed)
-        return [item.to_dict() for item in query.order_by(WritingSuggestion.created_at.desc()).all()]
+        return [item.to_dict() for item in query.order_by(WritingSuggestion.created_at.desc()).limit(limit).all()]
 
 
 @api.patch("/writing/suggestions/{suggestion_id}/review")
@@ -445,7 +480,7 @@ def ingest_notification(payload: NotificationIngestRequest):
     content = redact_sensitive_text(payload.content, limit=2000)
     summary = (content.split(".")[0].strip() or payload.title)[:300]
     with get_session() as session:
-        note = Notification(source=payload.source, raw_title=safe_excerpt(payload.title, 500), raw_content=content, summary=summary, reviewed=False)
+        note = Notification(source=safe_excerpt(payload.source, 255), raw_title=safe_excerpt(payload.title, 500), raw_content=content, summary=summary, reviewed=False)
         session.add(note)
         session.commit()
         session.refresh(note)
@@ -453,12 +488,12 @@ def ingest_notification(payload: NotificationIngestRequest):
 
 
 @api.get("/notifications")
-def list_notifications(reviewed: bool | None = None):
+def list_notifications(reviewed: bool | None = None, limit: int = Query(50, ge=1, le=100)):
     with get_session() as session:
         query = session.query(Notification)
         if reviewed is not None:
             query = query.filter(Notification.reviewed == reviewed)
-        return [note.to_dict() for note in query.order_by(Notification.created_at.desc()).all()]
+        return [note.to_dict() for note in query.order_by(Notification.created_at.desc()).limit(limit).all()]
 
 
 @api.patch("/notifications/{notification_id}/review")
@@ -501,7 +536,13 @@ def dismiss_planner_suggestion(suggestion_id: int):
 
 
 def _public_settings():
-    return {"capture_enabled": settings.capture_enabled, "external_llm_enabled": settings.allow_external_llm, "retention": {"snapshots_days": settings.snapshot_retention_days, "content_days": settings.content_retention_days}}
+    return {
+        "capture_enabled": settings.capture_enabled,
+        "external_llm_enabled": settings.allow_external_llm,
+        "retention": {"snapshots_days": settings.snapshot_retention_days, "content_days": settings.content_retention_days},
+        "snapshot_dedup_seconds": settings.snapshot_dedup_seconds,
+        "overview_items_limit": min(settings.overview_items_limit, 100),
+    }
 
 
 @api.get("/settings")

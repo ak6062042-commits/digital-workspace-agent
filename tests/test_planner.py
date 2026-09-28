@@ -5,6 +5,7 @@ from unittest.mock import patch
 from backend.orchestration.planner import Planner
 from backend.agents.web_agent import WebResearchAgent
 from backend.coordinator.scheduler import PlannerScheduler
+from backend.core.config import settings
 from backend.db.models import Task
 from backend.main import _writing_research_topics, _writing_suggestion
 from backend.agents.state_agent import DigitalStateAgent
@@ -73,6 +74,23 @@ class PlannerTests(unittest.TestCase):
         scheduler = PlannerScheduler(None)
         snapshot = SimpleNamespace(active_app="chrome.exe", active_window_title="Example", browser_tab_title="Example", browser_url="https://example.com/products")
         self.assertFalse(scheduler._looks_like_document_context(snapshot))
+
+    def test_scheduler_context_and_suggestion_memory_are_bounded(self):
+        scheduler = PlannerScheduler(None)
+        scheduler._current_key = ("current", "workspace")
+        scheduler._contexts = {
+            (f"app-{index}", f"context-{index}"): {"started_at": index}
+            for index in range(settings.planner_context_limit + 3)
+        }
+        scheduler._contexts[scheduler._current_key] = {"started_at": settings.planner_context_limit + 4}
+        scheduler._suggestions = [
+            {"id": index, "dismissed": False}
+            for index in range(settings.planner_suggestion_limit + 3)
+        ]
+        scheduler._trim_memory()
+        self.assertLessEqual(len(scheduler._contexts), settings.planner_context_limit)
+        self.assertIn(scheduler._current_key, scheduler._contexts)
+        self.assertLessEqual(len(scheduler._suggestions), settings.planner_suggestion_limit)
 
     def test_writing_improvement_includes_a_local_rewrite_and_text_keywords(self):
         text = "In order to improve FastAPI authentication, we should use OAuth2 examples."

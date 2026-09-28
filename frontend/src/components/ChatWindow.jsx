@@ -43,7 +43,6 @@ function playChime(type = 'wake') {
     // Audio context may be blocked before first user gesture
   }
 }
-
 const WAKE_PHRASES = [
   "hey agent",
   "hi agent",
@@ -56,23 +55,12 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
   const [isVoiceActive, setIsVoiceActive] = useState(false);
   const [isAwake, setIsAwake] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState('Voice recognition paused. Click the microphone to enable it.');
-  const [autoCountdown, setAutoCountdown] = useState(null);
 
   const messagesEndRef = useRef(null);
   const recognitionRef = useRef(null);
   const isListeningRef = useRef(false);
   const isWakeActiveRef = useRef(false);
   const wakeExpireTimerRef = useRef(null);
-  const autoExecuteTimerRef = useRef(null);
-  const countdownIntervalRef = useRef(null);
-  const latestCommandRef = useRef('');
-  const onSendMessageRef = useRef(onSendMessage);
-
-  // Keep callback ref updated to prevent useEffect stale closures
-  useEffect(() => {
-    onSendMessageRef.current = onSendMessage;
-  }, [onSendMessage]);
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -81,80 +69,16 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
     scrollToBottom();
   }, [messages, loading]);
 
-  // Direct Execution function: triggers with zero keyboard intervention
-  const executeSpokenCommand = useCallback((commandText) => {
-    const cleanCmd = (commandText || latestCommandRef.current).trim();
-    if (!cleanCmd) return;
-
-    // Reset all timers and wake states immediately
-    clearTimeout(autoExecuteTimerRef.current);
-    clearInterval(countdownIntervalRef.current);
-    clearTimeout(wakeExpireTimerRef.current);
-
-    autoExecuteTimerRef.current = null;
-    countdownIntervalRef.current = null;
-    isWakeActiveRef.current = false;
-    setIsAwake(false);
-    setAutoCountdown(null);
-    setInput('');
-    latestCommandRef.current = '';
-
-    // Play execution chime
-    playChime('execute');
-    setVoiceStatus(`🚀 Executing: "${cleanCmd}"...`);
-
-    // Dispatch message to agent coordinator
-    if (onSendMessageRef.current) {
-      onSendMessageRef.current(cleanCmd);
-    }
-
-    // Flush speech recognition buffer by aborting; onend will automatically restart it cleanly
-    try {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort();
-      }
-    } catch (e) {}
-
-    // Reset status back to listening after 3s
-    setTimeout(() => {
-      if (isListeningRef.current) {
-        setVoiceStatus('🟢 Always-On Voice Active: Say "Hey Agent"...');
-      }
-    }, 3000);
-  }, []);
-
-  // Schedule automatic 3-second countdown before firing without Enter key
-  const scheduleAutoExecution = useCallback((command) => {
+  // Voice transcription only stages a request. Sending remains a separate user action.
+  const stageVoiceCommand = useCallback((command) => {
     const clean = command.trim();
     if (!clean) return;
-
-    latestCommandRef.current = clean;
+    clearTimeout(wakeExpireTimerRef.current);
+    isWakeActiveRef.current = false;
+    setIsAwake(false);
     setInput(clean);
-
-    // Clear any previous countdown
-    if (autoExecuteTimerRef.current) clearTimeout(autoExecuteTimerRef.current);
-    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-
-    let remaining = 3;
-    setAutoCountdown(remaining);
-    setVoiceStatus(`⚡ Command detected: "${clean}" — Executing in ${remaining}s...`);
-
-    countdownIntervalRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining > 0) {
-        setAutoCountdown(remaining);
-        setVoiceStatus(`⚡ Command detected: "${clean}" — Executing in ${remaining}s...`);
-      } else {
-        clearInterval(countdownIntervalRef.current);
-      }
-    }, 1000);
-
-    // 3-second auto-fire timer
-    autoExecuteTimerRef.current = setTimeout(() => {
-      clearInterval(countdownIntervalRef.current);
-      executeSpokenCommand(clean);
-    }, 3000);
-  }, [executeSpokenCommand]);
+    setVoiceStatus('Voice command captured. Review it and press Send to continue.');
+  }, []);
 
   // Main Speech Recognition Setup (runs ONCE on mount, NEVER re-mounts)
   useEffect(() => {
@@ -174,7 +98,7 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
       isListeningRef.current = true;
       setIsVoiceActive(true);
       if (!isWakeActiveRef.current) {
-        setVoiceStatus('🟢 Always-On Voice Active: Say "Hey Agent"...');
+        setVoiceStatus('Voice recognition active. Say "Hey Agent"...');
       }
     };
 
@@ -210,23 +134,23 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
         const afterWake = fullTranscript.slice(wakeIndex + wakeLen).replace(/^[,:!.\s]+/, '').trim();
 
         if (afterWake) {
-          scheduleAutoExecution(afterWake);
+          stageVoiceCommand(afterWake);
         } else {
-          setVoiceStatus('⚡ "Hey Agent" heard! Say your command now (e.g. "open VS Code")...');
+          setVoiceStatus('"Hey Agent" heard. Say your command now (for example, "open VS Code").');
 
           // Reset wake state if user stays silent for 8 seconds
           clearTimeout(wakeExpireTimerRef.current);
           wakeExpireTimerRef.current = setTimeout(() => {
             isWakeActiveRef.current = false;
             setIsAwake(false);
-            setVoiceStatus('🟢 Always-On Voice Active: Say "Hey Agent"...');
+            setVoiceStatus('Voice recognition active. Say "Hey Agent"...');
           }, 8000);
         }
       }
       // Case 2: Already awake, user is speaking the command
       else if (isWakeActiveRef.current) {
         if (fullTranscript) {
-          scheduleAutoExecution(fullTranscript);
+          stageVoiceCommand(fullTranscript);
         }
       }
     };
@@ -261,12 +185,10 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
 
     return () => {
       isListeningRef.current = false;
-      clearTimeout(autoExecuteTimerRef.current);
-      clearInterval(countdownIntervalRef.current);
       clearTimeout(wakeExpireTimerRef.current);
       try { recognizer.abort(); } catch (e) {}
     };
-  }, [scheduleAutoExecution]);
+  }, [stageVoiceCommand]);
 
   // Toggle Voice Mode manually if desired
   const toggleVoiceMode = () => {
@@ -280,17 +202,14 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
       try { recognitionRef.current.abort(); } catch (e) {}
       setIsVoiceActive(false);
       setIsAwake(false);
-      setAutoCountdown(null);
       setVoiceStatus('Voice recognition paused. Click mic to re-enable.');
-      clearTimeout(autoExecuteTimerRef.current);
-      clearInterval(countdownIntervalRef.current);
     } else {
       try {
         isListeningRef.current = true;
         recognitionRef.current.start();
         setIsVoiceActive(true);
         playChime('wake');
-        setVoiceStatus('🟢 Always-On Voice Active: Say "Hey Agent"...');
+        setVoiceStatus('Voice recognition active. Say "Hey Agent"...');
       } catch (err) {
         console.warn('Voice restart notice:', err);
       }
@@ -301,11 +220,8 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
     e?.preventDefault();
     if (!input.trim() || loading) return;
 
-    // Clear speech timers if user submitted manually
-    clearTimeout(autoExecuteTimerRef.current);
-    clearInterval(countdownIntervalRef.current);
+    // End the active voice wake state before sending a reviewed command.
     clearTimeout(wakeExpireTimerRef.current);
-    setAutoCountdown(null);
     isWakeActiveRef.current = false;
     setIsAwake(false);
 
@@ -348,7 +264,7 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
 
       {/* Floating Studio Dock at Bottom */}
       <div className="floating-dock-container">
-        {/* Dynamic Voice Status & Auto-Execute Countdown Banner */}
+        {/* Dynamic Voice Status Banner */}
         <div style={{
           background: isAwake ? 'rgba(212, 255, 0, 0.15)' : 'rgba(20, 20, 20, 0.85)',
           border: `1px solid ${isAwake ? 'rgba(212, 255, 0, 0.6)' : 'rgba(255, 255, 255, 0.1)'}`,
@@ -367,20 +283,6 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
         }}>
           <Zap size={14} className={isAwake ? 'animate-bounce text-lime-400' : 'text-emerald-400'} style={{ color: isAwake ? 'var(--hf-lime)' : '#10b981' }} />
           <span style={{ fontWeight: 600 }}>{voiceStatus}</span>
-          {autoCountdown !== null && (
-            <span style={{
-              background: 'var(--hf-lime)',
-              color: '#000',
-              padding: '2px 8px',
-              borderRadius: 'var(--radius-pill)',
-              fontSize: '11px',
-              fontWeight: 900,
-              letterSpacing: '0.05em',
-              animation: 'pulse 1s infinite'
-            }}>
-              AUTO-FIRING IN {autoCountdown}S
-            </span>
-          )}
         </div>
 
         {/* Suggested Prompt Chips */}
@@ -422,7 +324,7 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
             onKeyDown={handleKeyDown}
             placeholder={
               isAwake
-                ? '⚡ "Hey Agent" active — Speak your command (auto-executes in 3s)...'
+                ? 'Voice command ready. Review it, then press Send.'
                 : 'Say "Hey Agent, open VS Code" or type here...'
             }
             className="input-hf"

@@ -44,7 +44,14 @@ async def require_api_token(
 
 async def limit_request_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > settings.request_max_bytes:
+    try:
+        declared_length = int(content_length) if content_length else None
+    except ValueError:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": "Invalid Content-Length header"},
+        )
+    if declared_length is not None and (declared_length < 0 or declared_length > settings.request_max_bytes):
         return JSONResponse(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             content={"detail": "Request body too large"},

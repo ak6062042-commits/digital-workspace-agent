@@ -41,6 +41,8 @@ SQLite stores four structured models:
 
 On startup, the database enables WAL, a ten-second busy timeout, foreign keys, forward-only task migrations, and retention cleanup. Snapshots default to 14 days; notification and writing records default to 30 days.
 
+The watcher transmits only the five fields in the snapshot API contract. Before persistence, titles receive local redaction and workspace URLs lose user-info, fragments, and secret-bearing query values. Identical snapshots received within the configured deduplication window are returned as duplicates rather than growing history. Dashboard overview queries are indexed and capped; the background planner also caps its context and suggestion memory.
+
 ## Security boundary
 
 ```
@@ -53,10 +55,12 @@ Dashboard / Local agent / Extension / Widget
 ```
 
 - `API_TOKEN` is required for every API route except `/health`.
-- `BACKEND_HOST` must be loopback unless Docker explicitly sets its container-only exception.
+- `BACKEND_HOST` and CORS origins must be loopback-only unless the deployment is redesigned behind an authenticated reverse proxy. Trusted Host middleware rejects undeclared Host headers.
 - The extension stores its locally configured token in extension storage and makes authenticated calls only to loopback.
 - Generic shell command execution and arbitrary application launch are absent.
-- Rendered Markdown discards raw HTML and unsafe link schemes.
+- Rendered Markdown is sanitized with DOMPurify immediately before its HTML sink.
+- Voice recognition only stages text in the command composer. Sending it remains a separate explicit user action.
+- The local watcher has no direct-database fallback and therefore cannot bypass API authentication, validation, or retention handling.
 
 ## Browser and writing privacy
 

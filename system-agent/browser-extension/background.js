@@ -25,7 +25,7 @@ async function sendSnapshot(tab) {
     body: JSON.stringify({
       active_app: "Google Chrome", active_window_title: tab.title || "Browser Window",
       browser_url: tab.url, browser_tab_title: tab.title || "Untitled Tab",
-      captured_at: new Date().toISOString(), metadata: { source: "browser-extension" }
+      captured_at: new Date().toISOString()
     })
   });
   await chrome.storage.local.set({ lastSync: new Date().toISOString(), status: "connected", activeTab: { title: tab.title, url: tab.url } });

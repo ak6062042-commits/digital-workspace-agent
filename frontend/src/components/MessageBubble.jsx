@@ -1,27 +1,27 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Bot, User, Check, Copy, CheckSquare, Globe, ExternalLink, Zap, Volume2 } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 import { openBrowserUrl } from '../api/client';
 
-// Raw HTML and unsafe URL schemes are discarded before React receives markup.
 marked.setOptions({
   gfm: true,
   breaks: true,
 });
 
-const renderer = new marked.Renderer();
-renderer.link = ({ href, text }) => {
-  if (!/^https?:\/\//i.test(href || '')) return `<span>${text}</span>`;
-  return `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-};
-renderer.html = () => '';
-marked.use({ renderer });
+function renderMarkdown(content) {
+  return DOMPurify.sanitize(marked.parse(content || ''), {
+    FORBID_TAGS: ['base', 'embed', 'form', 'iframe', 'object', 'script', 'style'],
+    FORBID_ATTR: ['style'],
+  });
+}
 
 export function MessageBubble({ message }) {
   const isUser = message.role === 'user';
   const [copied, setCopied] = useState(false);
   const [openingBrowser, setOpeningBrowser] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const renderedContent = useMemo(() => renderMarkdown(message.content), [message.content]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -124,7 +124,7 @@ export function MessageBubble({ message }) {
 
         <div
           className="bubble-markdown"
-          dangerouslySetInnerHTML={{ __html: marked.parse(message.content || '') }}
+          dangerouslySetInnerHTML={{ __html: renderedContent }}
         />
 
         {/* Live Desktop Browser Action Card */}

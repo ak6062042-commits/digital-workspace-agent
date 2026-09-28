@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -44,29 +45,56 @@ class Settings:
     backend_port: int = int(os.getenv("BACKEND_PORT", "8000"))
     api_token: str = os.getenv("API_TOKEN", "")
     cors_origin: str = os.getenv("CORS_ORIGIN", "http://localhost:5173,http://127.0.0.1:5173")
+    allowed_hosts_value: str = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,[::1],testserver")
     request_max_bytes: int = int(os.getenv("REQUEST_MAX_BYTES", "65536"))
     rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "600"))
     snapshot_retention_days: int = int(os.getenv("SNAPSHOT_RETENTION_DAYS", "14"))
     content_retention_days: int = int(os.getenv("CONTENT_RETENTION_DAYS", "30"))
     capture_enabled: bool = _bool("CAPTURE_ENABLED", False)
     allow_external_llm: bool = _bool("ALLOW_EXTERNAL_LLM", False)
-    auto_execute_low_risk: bool = _bool("AUTO_EXECUTE_LOW_RISK", True)
+    auto_execute_low_risk: bool = _bool("AUTO_EXECUTE_LOW_RISK", False)
     allow_container_bind: bool = _bool("ALLOW_CONTAINER_BIND", False)
     web_search_provider: str = os.getenv("WEB_SEARCH_PROVIDER", "chrome").strip().lower()
     suggestion_poll_seconds: int = _positive_int("SUGGESTION_POLL_SECONDS", 5)
     document_suggestion_seconds: int = _positive_int("DOCUMENT_SUGGESTION_SECONDS", 20)
     document_suggestion_cooldown_seconds: int = _positive_int("DOCUMENT_SUGGESTION_COOLDOWN_SECONDS", 120)
+    snapshot_dedup_seconds: int = _positive_int("SNAPSHOT_DEDUP_SECONDS", 5)
+    overview_items_limit: int = _positive_int("OVERVIEW_ITEMS_LIMIT", 50)
+    planner_context_limit: int = _positive_int("PLANNER_CONTEXT_LIMIT", 100)
+    planner_suggestion_limit: int = _positive_int("PLANNER_SUGGESTION_LIMIT", 50)
 
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origin.split(",") if origin.strip()]
 
+    @property
+    def allowed_hosts(self) -> list[str]:
+        hosts = [host.strip() for host in self.allowed_hosts_value.split(",") if host.strip()]
+        if self.allow_container_bind and "backend" not in hosts:
+            hosts.append("backend")
+        return hosts
+
     def validate_runtime(self) -> None:
-        insecure_token = not self.api_token or self.api_token in {"change-me", "replace-with-a-long-random-token"}
+        insecure_token = (
+            len(self.api_token) < 32
+            or self.api_token in {"change-me", "replace-with-a-long-random-token"}
+        )
         if insecure_token:
             raise RuntimeError("API_TOKEN must be a long random value. Run scripts/setup before starting the backend.")
         if self.backend_host not in {"127.0.0.1", "localhost", "::1"} and not (self.backend_host == "0.0.0.0" and self.allow_container_bind):
             raise RuntimeError("BACKEND_HOST must remain loopback; use an authenticated reverse proxy for remote access.")
+        if not self.cors_origins:
+            raise RuntimeError("CORS_ORIGIN must list at least one explicit local frontend origin.")
+        for origin in self.cors_origins:
+            parsed = urlparse(origin)
+            if (
+                "*" in origin
+                or parsed.scheme not in {"http", "https"}
+                or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+            ):
+                raise RuntimeError("CORS_ORIGIN must contain only explicit loopback HTTP(S) origins.")
+        if not self.allowed_hosts or any(host == "*" for host in self.allowed_hosts):
+            raise RuntimeError("ALLOWED_HOSTS must contain explicit host names.")
 
 
 settings = Settings()

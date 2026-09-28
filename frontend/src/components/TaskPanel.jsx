@@ -16,9 +16,11 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, 
     e.preventDefault();
     if (!newTitle.trim()) return;
     setSubmitting(true);
-    await onCreateTask(newTitle.trim());
-    setNewTitle('');
-    setSubmitting(false);
+    try {
+      if (await onCreateTask(newTitle.trim())) setNewTitle('');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const activeCount = tasks.filter(t => !t.done).length;

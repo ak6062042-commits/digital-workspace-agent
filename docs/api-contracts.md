@@ -39,6 +39,8 @@ Collection endpoints support `limit` (1-100, default 50). `/api/workspace/overvi
 
 Chat response shape includes a human response, `plan`, execution `status`, optional `confirmation_id`, task updates, browser action data, and current state. A plan contains `intent`, `category`, `action`, `arguments`, `confirmation_required`, and `expected_result`.
 
+When chat resolves to `web.research`, the default `duckduckgo` provider collects live results with a Bing RSS fallback, reads the configured leading pages, and returns a source-attributed brief plus `research_sources`. It also opens the visible desktop search when the plan requests it. Set `WEB_SEARCH_PROVIDER=chrome`, `browser`, or `manual` for a browser-only research path.
+
 ## Tasks
 
 | Method | Route | Purpose |
@@ -76,7 +78,7 @@ Creating a task:
 | `POST` / `GET` | `/api/writing/analyze` / `/api/writing/suggestions` | Explicit, local writing assistance/list. |
 | `PATCH` / `DELETE` | `/api/writing/suggestions/{id}/review` / `{id}` | Mark reviewed/delete. |
 
-Writing analysis requires `consent: true` and an `operation` of `summarize`, `improve`, `explain`, or `ideas`. It returns local improvement text plus extracted `keywords` and `related_queries`; Chrome receives a query only after the user selects one.
+Writing analysis accepts up to 12,000 characters with `consent: true` and an `operation` of `summarize`, `improve`, `explain`, or `ideas`. It returns local improvement text plus extracted `keywords` and `related_queries`; Chrome receives a query only after the user selects one. Browser-page summarization accepts up to 20,000 submitted characters and returns an extractive summary, key takeaways, keywords, and word count.
 
 The Word add-in is an authenticated client of this endpoint. It obtains text through `Office.context.document.getSelectedDataAsync` only after a button click; it does not receive or submit the rest of the document.
 

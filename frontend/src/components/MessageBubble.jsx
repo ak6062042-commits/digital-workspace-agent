@@ -58,6 +58,12 @@ export function MessageBubble({ message }) {
   };
 
   const handleOpenBrowser = async (url) => {
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported URL');
+    } catch {
+      return;
+    }
     setOpeningBrowser(true);
     try {
       await openBrowserUrl(url);
@@ -70,12 +76,17 @@ export function MessageBubble({ message }) {
 
   const getAgentLabel = (agent) => {
     switch (agent) {
+      case 'state':
       case 'state_agent':
         return { label: 'Digital State Agent', class: 'state_agent' };
+      case 'task':
       case 'task_agent':
         return { label: 'Task Pipeline Agent', class: 'task_agent' };
+      case 'web':
       case 'web_agent':
         return { label: 'Web Research Agent', class: 'web_agent' };
+      case 'desktop':
+      case 'browser':
       case 'os_agent':
         return { label: 'Desktop OS Agent', class: 'os_agent' };
       default:
@@ -86,6 +97,7 @@ export function MessageBubble({ message }) {
   const agentInfo = !isUser ? getAgentLabel(message.metadata?.routed_agent) : null;
   const tasksCreated = message.metadata?.tasks_created || [];
   const browserInfo = message.metadata?.browser_info;
+  const researchSources = message.metadata?.research_sources || [];
 
   return (
     <div className={`bubble-row ${isUser ? 'user' : 'assistant'}`}>
@@ -160,6 +172,20 @@ export function MessageBubble({ message }) {
               <ExternalLink size={12} />
               <span>{openingBrowser ? 'Opening...' : 'Open in Browser'}</span>
             </button>
+          </div>
+        )}
+
+        {researchSources.length > 0 && (
+          <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(96, 165, 250, 0.06)', border: '1px solid rgba(96, 165, 250, 0.24)', borderRadius: 'var(--radius-md)' }}>
+            <div style={{ fontSize: '10.5px', color: '#93c5fd', fontWeight: 700, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Research sources</div>
+            <div style={{ fontSize: 10, color: 'var(--hf-text-muted)', marginBottom: 7 }}>Retrieved content can be inaccurate or malicious. Inspect the domain before opening a source.</div>
+            {researchSources.slice(0, 6).map((source) => (
+              <button key={source.url} onClick={() => handleOpenBrowser(source.url)} disabled={openingBrowser} className="btn-hf-ghost" title={`Open ${source.domain || source.url} in your browser`} style={{ width: '100%', padding: '7px 0', border: 'none', borderBottom: '1px solid var(--hf-border-subtle)', borderRadius: 0, textAlign: 'left', display: 'block' }}>
+                <span style={{ display: 'block', color: 'var(--hf-text-primary)', fontSize: 11, fontWeight: 650 }}>{source.title}</span>
+                <span style={{ display: 'block', color: 'var(--hf-text-muted)', fontSize: 10, marginTop: 2 }}>{source.domain || source.url}</span>
+                {source.summary && <span style={{ display: 'block', color: 'var(--hf-text-secondary)', fontSize: 10, marginTop: 3, lineHeight: 1.35 }}>{source.summary}</span>}
+              </button>
+            ))}
           </div>
         )}
 

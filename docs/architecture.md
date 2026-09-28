@@ -64,7 +64,7 @@ Dashboard / Local agent / Extension / Widget
 
 ## Browser and writing privacy
 
-The browser extension has no background content script and does not listen for input events. It injects a short-lived script only after the user presses **Summarize Tab** or **Analyze selected text**. Writing analysis requires consent in the payload, redacts common secrets/PII locally, and does not query external search services.
+The browser extension has no background content script and does not listen for input events. It injects a short-lived script only after the user presses **Summarize Tab** or **Analyze selected text**. Writing analysis is based on submitted text, while a chat research request uses live web search, readable-page extraction, and source-attributed local synthesis by default.
 
 ## Platform adapters
 

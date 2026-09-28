@@ -12,8 +12,8 @@ The project is designed around a simple rule: observing context, suggesting work
 | Conversational control | Natural-language chat interface | The backend classifies the request, generates a typed plan, and applies policy before an execution-capable step can run. |
 | Human approval | Explicit confirmation for consequential actions | A confirmation card is returned to the client; no hidden approval is inferred. Confirmation requests are intentionally in memory and expire if the backend restarts. |
 | Task management | Create, list, update, navigate to, and link tasks to the current workspace | Tasks support pending, ongoing, and done states plus sanitized source context. |
-| Research assistance | User-triggered browser research | By default, a research request opens a Chrome/Google query rather than scraping the web in the background. |
-| Writing support | Summarize, improve, explain, and brainstorm from supplied text | Text analysis requires consent, is bounded in size, redacted before persistence, and returns a local suggestion plus optional search queries. |
+| Research assistance | Live web research with source-linked briefs | By default, a research request searches DuckDuckGo with Bing RSS fallback, reads leading result pages, opens a visible desktop search, and returns a concise cited brief. |
+| Writing support | Summarize, improve, explain, and brainstorm from supplied text | Handles drafts, notes, selected text, and browser pages up to practical working lengths, then returns local analysis plus relevant research queries. |
 | Browser companion | Chrome extension for active-tab context, page summaries, and selected-text analysis | Active-tab sync is opt-in. Page/selection content is injected only after a direct popup action. |
 | Word integration | Local Microsoft Word task pane | Reads selected document text only after the person presses an analysis button. |
 | Notifications | Authenticated local notification inbox | Notifications are summarized, reviewable, deletable, redacted, and subject to retention cleanup; there is no native WhatsApp or OS-notification bridge. |
@@ -121,7 +121,8 @@ The React/Vite dashboard is the primary daily interface. It includes:
 - A notification inbox with review controls and a deletion confirmation step.
 - Optional voice input and voice output controls. Speech recognition only prepares text for the normal Send action; it never auto-sends or auto-executes a command.
 - Sanitized Markdown rendering for assistant messages.
-- Visible API errors, a client request timeout, and non-overlapping polling so a slow refresh cannot stack repeated dashboard requests.
+- A multiline command composer, clear-chat control, dedicated quick-research input, completed-task filtering, action-feedback toasts, and visible API errors.
+- A responsive workspace drawer for narrower screens, a client request timeout, and non-overlapping polling so a slow refresh cannot stack repeated dashboard requests.
 
 The dashboard polls workspace overview data at a configurable interval, while preserving manual refresh for a person who wants an immediate update.
 
@@ -167,11 +168,15 @@ Task records use forward-compatible database migration handling and sanitized UR
 
 Research is deliberately user-visible and user-triggered.
 
-- The default provider is `chrome`. A research request opens Chrome with a Google query rather than invisibly searching, scraping, or summarizing web pages.
+- The default provider is `duckduckgo`. A research request performs a live DuckDuckGo search with a Bing RSS fallback, reads up to the configured number of leading result pages, and returns a source-attributed brief directly in chat.
+- The dashboard keeps both the visible desktop search and clickable source cards, so you can continue reading any source in the browser.
+- Source cards show the title, domain, and extractive snippet before opening. Retrieved pages are treated as untrusted; automated retrieval rejects credential-bearing, local, private, and redirect-to-private targets.
+- Set `WEB_SEARCH_PROVIDER=chrome` when you specifically want browser-only manual research with no retrieval or summary in the assistant.
 - Opening a link requires an explicitly supplied `http` or `https` URL.
 - The Chrome popup can request a summary of the active tab only after the user presses **Summarize Tab**.
 - The popup can analyze selected text only after the user presses its analysis action.
-- Page and selection content are summarized or analyzed by the backend's local routines unless an external provider has been deliberately configured.
+- The Chrome companion can submit up to 18,000 characters from an explicitly requested page summary and up to 12,000 selected characters for a writing pass.
+- Browser summaries use extractive ranking, return key takeaways and keywords, and can process up to 20,000 submitted characters.
 
 Non-default research-provider paths are available for development use, but they make outbound requests and should be enabled only after reviewing the privacy implications for your environment.
 
@@ -216,10 +221,11 @@ The supplied manifest is intended for local HTTP development. Word may display a
 
 ### 10. Desktop widget
 
-The optional PyQt widget is a compact local companion that reads workspace overview and uses the same chat API.
+The optional PyQt widget is a resizable personal command center that reads workspace overview and uses the same chat API.
 
-- Displays current snapshot, tasks, notifications, planner suggestions, and writing-related information.
-- Does not bypass authentication, planner policy, confirmation, retention, or redaction.
+- Separates daily work into **Today**, **Research**, and **Inbox & Writing** tabs, with a current-work summary and connection feedback.
+- Supports quick commands, current-context research, task completion, task context linking/reopening, review actions, planner dismissal, writing-related research, and explicit source buttons.
+- Shows source domains and requires a user click before opening an external source page.
 - Requires the separate widget dependencies and a running backend.
 
 ### 11. Notifications
@@ -362,7 +368,7 @@ Copy `.env.example` to `.env`; do not commit the resulting file. The template co
 | `VITE_API_TOKEN` | placeholder | Token compiled into the local dashboard development configuration; must match the backend token. |
 | `CORS_ORIGIN` | local Vite origins | Comma-separated explicit browser origins permitted to call the API. |
 | `ALLOWED_HOSTS` | local hosts/test host | Trusted Host allowlist. |
-| `REQUEST_MAX_BYTES` | `65536` | Maximum accepted request body size. |
+| `REQUEST_MAX_BYTES` | `262144` | Maximum accepted request body size, sized for long page and document analysis. |
 | `RATE_LIMIT_PER_MINUTE` | `600` | Per client/user-agent request ceiling. |
 | `SNAPSHOT_RETENTION_DAYS` | `14` | Snapshot retention period. |
 | `CONTENT_RETENTION_DAYS` | `30` | Writing and notification retention period. |
@@ -377,7 +383,10 @@ Copy `.env.example` to `.env`; do not commit the resulting file. The template co
 | `LLM_PROVIDER` | `none` | Configured external provider, if explicitly enabled. |
 | `LLM_MODEL` | blank | Model identifier for an explicitly enabled provider. |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | blank | Optional provider credentials; leave blank for local-only operation. |
-| `WEB_SEARCH_PROVIDER` | `chrome` | `chrome` opens a visible query. Other development provider paths may make outbound requests. |
+| `WEB_SEARCH_PROVIDER` | `duckduckgo` | Live web research default. Set `chrome`, `browser`, or `manual` to keep research browser-only. |
+| `RESEARCH_MAX_RESULTS` | `6` | Maximum live search results collected for one research request. |
+| `RESEARCH_FETCH_RESULTS` | `4` | Number of leading result pages read for a research brief. |
+| `RESEARCH_MAX_CHARS` | `6000` | Maximum extracted text read from each result page. |
 | `PLANNER_CONTEXT_LIMIT` | `100` | Maximum context records provided to the planner. |
 | `PLANNER_SUGGESTION_LIMIT` | `50` | Maximum planner suggestions returned/stored in a bounded cycle. |
 | `SUGGESTION_POLL_SECONDS` | `5` | Dashboard/planner suggestion polling cadence. |
@@ -484,7 +493,7 @@ Set-Location frontend
 npm run build
 ```
 
-The test suite includes security-focused coverage for authentication, configuration validation, URL sanitization/redaction, snapshot constraints, policy behavior, and related backend functions. Run the frontend build after changing React code to catch Vite/TypeScript-adjacent bundling errors.
+The test suite covers research parsing/synthesis, authentication, configuration validation, URL sanitization/redaction, snapshot constraints, policy behavior, and related backend functions. Run the frontend build after changing React code to catch Vite bundling errors.
 
 ## Known limits
 

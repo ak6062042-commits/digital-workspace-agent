@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowUp, Sparkles, Mic, MicOff, Volume2, VolumeX, Radio, Zap } from 'lucide-react';
+import { ArrowUp, Sparkles, Mic, MicOff, Volume2, VolumeX, Trash2, Zap } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 
 const SUGGESTED_PROMPTS = [
-  "Hey Agent, open VS Code",
-  "Hey Agent, open Terminal",
-  "Hey Agent, search Railway vs Vercel on the browser",
-  "Hey Agent, what was I working on?"
+  "Research the best notes app for developers",
+  "Create task: organize project files",
+  "What was I working on?",
+  "Open VS Code"
 ];
 
 // Web Audio API Chimes (Pure JavaScript, zero external asset dependencies)
@@ -49,7 +49,7 @@ const WAKE_PHRASES = [
   "agent,"
 ];
 
-export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onToggleVoice }) {
+export function ChatWindow({ messages, onSendMessage, onClearMessages, loading, voiceEnabled, onToggleVoice }) {
   const [input, setInput] = useState('');
   // Microphone capture is opt-in and remains visibly paused until enabled.
   const [isVoiceActive, setIsVoiceActive] = useState(false);
@@ -244,6 +244,13 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
     <div className="chat-pane">
       {/* Scrollable Messages Stream */}
       <div className="chat-messages">
+        {messages.length > 1 && (
+          <div style={{ alignSelf: 'center' }}>
+            <button className="btn-hf-ghost" onClick={onClearMessages} style={{ padding: '4px 10px', fontSize: 10 }} title="Clear this local chat transcript">
+              <Trash2 size={11} /> Clear chat
+            </button>
+          </div>
+        )}
         {messages.map((msg, index) => (
           <MessageBubble key={index} message={msg} />
         ))}
@@ -317,18 +324,21 @@ export function ChatWindow({ messages, onSendMessage, loading, voiceEnabled, onT
             {isVoiceActive ? <Mic size={16} strokeWidth={2.5} /> : <MicOff size={16} />}
           </button>
 
-          <input
-            type="text"
+          <textarea
+            rows={1}
+            maxLength={4000}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-label="Message to the workspace assistant"
             placeholder={
               isAwake
                 ? 'Voice command ready. Review it, then press Send.'
-                : 'Say "Hey Agent, open VS Code" or type here...'
+                : 'Ask anything — Enter sends, Shift+Enter adds a line'
             }
             className="input-hf"
             disabled={loading}
+            style={{ resize: 'none', minHeight: 24, maxHeight: 84, lineHeight: 1.45, paddingTop: 2 }}
           />
 
           {/* Text-To-Speech (Voice Output) Toggle */}

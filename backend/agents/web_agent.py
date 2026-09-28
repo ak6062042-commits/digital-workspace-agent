@@ -1,141 +1,112 @@
-import re
-import urllib.parse
-import logging
-from typing import Dict, Any, List, Optional
+"""Live web research with source-attributed local synthesis."""
+from __future__ import annotations
 
-from backend.tools.search_tool import search_web
-from backend.tools.fetch_tool import fetch_webpage_content
-from backend.tools.browser_tool import search_in_browser, open_url_in_browser
+import logging
+import re
+from typing import Any
+from urllib.parse import urlparse
+
 from backend.core.config import settings
+from backend.core.text_analysis import key_takeaways, summarize_text
+from backend.tools.browser_tool import search_in_browser
+from backend.tools.fetch_tool import fetch_webpage_content
+from backend.tools.search_tool import search_web
+
 
 logger = logging.getLogger("WebResearchAgent")
 
 
 class WebResearchAgent:
-    """
-    Web Research Agent implementing the Search + Fetch + Synthesize loop.
-    Launches the desktop browser when instructed to search or open on the browser.
-    """
-
-    @staticmethod
-    def _should_launch_browser(query: str) -> bool:
-        """Check if user asked to search or open in the browser."""
-        q_lower = query.lower()
-        triggers = [
-            "search it on the browser",
-            "search on the browser",
-            "search on browser",
-            "search in the browser",
-            "search in browser",
-            "search this on the browser",
-            "on the browser",
-            "in the browser",
-            "on browser",
-            "in browser",
-            "open browser",
-            "open chrome",
-            "launch browser",
-            "open in browser",
-            "browse to",
-            "open tab",
-            "open google",
-        ]
-        return any(t in q_lower for t in triggers)
+    """Search, read a useful subset of sources, and return a concise cited brief."""
 
     @staticmethod
     def _clean_search_query(query: str) -> str:
-        """Remove trigger phrases so the browser search receives the clean target subject."""
         cleaned = re.sub(
             r"(?i)\b(search it on the browser|search on the browser|search on browser|search in the browser|search in browser|search this on the browser|on the browser|in the browser|on browser|in browser|open browser and search|open browser for|open browser to|browse to|open tab for)\b",
             "",
-            query
+            query,
         ).strip()
-        # Also clean leading search / for
-        cleaned = re.sub(r"(?i)^(search for|search|find|look up)\s+", "", cleaned).strip()
-        return cleaned if len(cleaned) > 2 else query
+        cleaned = re.sub(r"(?i)^(search for|search|find|look up|research|compare)\s+", "", cleaned).strip(" :.-")
+        return cleaned if len(cleaned) > 2 else query.strip()
 
-    def handle(self, query: str, launch_browser: bool = False) -> Dict[str, Any]:
-        """
-        Execute research in chat. If asked to search on the browser, also physically launch desktop browser.
-        """
-        logger.info("Web research initiated for query: '%s'", query)
+    @staticmethod
+    def _browser_engine() -> str:
+        provider = settings.web_search_provider
+        return provider if provider in {"google", "duckduckgo", "bing"} else "duckduckgo"
 
-        should_launch = launch_browser
-        clean_query = self._clean_search_query(query)
-
-        # 1. Launch desktop browser if requested to search on browser
-        browser_info = None
-        if should_launch:
-            try:
-                # Chrome is the visible search provider.  The local search helper
-                # still supplies compact sources for the in-app response.
-                engine = "google" if settings.web_search_provider == "chrome" else settings.web_search_provider
-                browser_info = search_in_browser(clean_query, engine=engine, bring_to_front=True)
-                logger.info("Launched live browser search for: %s", clean_query)
-            except Exception as e:
-                logger.warning("Could not launch browser: %s", e)
-
-        # Chrome mode deliberately stops here. It is fast, avoids server-side
-        # browsing, and leaves result selection and reading to the user.
-        if settings.web_search_provider == "chrome":
-            response = (
-                f"Opened Google Chrome with the search query **{clean_query}**. No web pages were fetched or summarised by the agent."
-                if browser_info and browser_info.get("success")
-                else f"Prepared the Chrome search query **{clean_query}**, but Chrome could not be launched."
-            )
-            return {
-                "agent": "web_agent",
-                "response": response,
-                "search_results": [],
-                "browser_info": browser_info,
-                "tasks_created": [],
-            }
-
-        # Non-Chrome providers retain the legacy opt-in search/fetch path.
-        search_results = search_web(clean_query, max_results=3)
-
-        # 3. Extract content from top results
-        fetched_snippets = []
-        for result in search_results[:2]:
-            url = result.get("url")
-            if url and url.startswith("http") and "duckduckgo.com" not in url:
-                content = fetch_webpage_content(url, max_chars=1200)
-                if content and not content.startswith(("Error", "Failed")):
-                    fetched_snippets.append(f"### From [{result.get('title')}]({url}):\n{content[:400]}...")
-
-        # 4. Synthesize conversational, professional assistant response
-        response_parts = []
-        if browser_info:
-            response_parts.append(f"🌐 **Browser Action**: I have launched Google Chrome and searched for *\"{clean_query}\"* on your desktop screen.\n")
-
-        response_parts.append(f"Here is the research summary for **\"{clean_query}\"**:\n")
-
-        for idx, item in enumerate(search_results, 1):
-            response_parts.append(f"**{idx}. [{item.get('title')}]({item.get('url')})**")
-            response_parts.append(f"> {item.get('snippet')}\n")
-
-        if fetched_snippets:
-            response_parts.append("#### Key Insights:")
-            response_parts.extend(fetched_snippets)
-
-        response_parts.append("\n**Summary & Recommendation**:")
-        if "railway" in clean_query.lower() or "vercel" in clean_query.lower():
-            response_parts.append("- **Vercel** is ideal for deploying the Vite frontend with zero-config edge CDN.")
-            response_parts.append("- **Railway** is best for the FastAPI backend container to support persistent state and background workers without serverless execution timeouts.")
-        else:
-            response_parts.append(f"- The documentation and community resources indicate strong support for {clean_query}.")
-
+    @staticmethod
+    def _source_record(result: dict[str, str], content: str | None = None) -> dict[str, str]:
+        url = result.get("url", "")
         return {
-            "agent": "web_agent",
-            "response": "\n".join(response_parts),
-            "search_results": search_results,
-            "browser_info": browser_info,
-            "tasks_created": []
+            "title": result.get("title") or urlparse(url).netloc or "Untitled source",
+            "url": url,
+            "domain": result.get("domain") or urlparse(url).netloc.removeprefix("www."),
+            "snippet": result.get("snippet", ""),
+            "summary": summarize_text(content or result.get("snippet", ""), maximum_sentences=2, maximum_characters=500),
         }
 
     @staticmethod
-    def related_document_queries(title: str) -> List[Dict[str, str]]:
-        """Build local query suggestions; Chrome only receives one after a user click."""
+    def _markdown_link(title: str, url: str) -> str:
+        safe_title = (title or url).replace("[", "\\[").replace("]", "\\]")
+        safe_url = url.replace("(", "%28").replace(")", "%29")
+        return f"[{safe_title}]({safe_url})"
+
+    def _build_brief(self, query: str, sources: list[dict[str, str]], browser_info: dict[str, Any] | None) -> str:
+        lines = [f"## Research brief: {query}"]
+        if browser_info and browser_info.get("success"):
+            lines.append(f"I also opened a live {browser_info.get('engine', 'web')} search in your browser.")
+        lines.append(f"I found {len(sources)} source{'s' if len(sources) != 1 else ''} and read the leading result pages where they were available.")
+        lines.extend(["", "### Key findings"])
+        for source in sources:
+            link = self._markdown_link(source["title"], source["url"])
+            summary = source.get("summary") or source.get("snippet") or "The source did not provide a readable extract."
+            lines.append(f"- **{link}** ({source.get('domain') or 'web'}): {summary}")
+        lines.extend(["", "### Sources"])
+        for index, source in enumerate(sources, 1):
+            lines.append(f"{index}. {self._markdown_link(source['title'], source['url'])} — {source.get('domain') or 'web'}")
+        return "\n".join(lines)
+
+    def handle(self, query: str, launch_browser: bool = False) -> dict[str, Any]:
+        clean_query = self._clean_search_query(query)
+        if not clean_query:
+            return {"agent": "web_agent", "response": "Tell me what you want researched.", "search_results": [], "sources": [], "browser_info": None, "tasks_created": []}
+
+        browser_info = None
+        if launch_browser:
+            try:
+                browser_info = search_in_browser(clean_query, engine=self._browser_engine(), bring_to_front=True)
+            except Exception as error:
+                logger.info("Could not launch browser research: %s", error)
+
+        if settings.web_search_provider in {"chrome", "browser", "manual"}:
+            response = (
+                f"Opened a browser search for **{clean_query}**. Browser-only mode is active, so I did not retrieve pages into the assistant."
+                if browser_info and browser_info.get("success")
+                else f"Browser-only mode is active. Prepared a browser search for **{clean_query}**, but the browser could not be launched."
+            )
+            return {"agent": "web_agent", "response": response, "search_results": [], "sources": [], "browser_info": browser_info, "tasks_created": []}
+
+        results = search_web(clean_query, max_results=settings.research_max_results)
+        sources: list[dict[str, str]] = []
+        for index, result in enumerate(results):
+            content = None
+            if index < settings.research_fetch_results:
+                content = fetch_webpage_content(result.get("url", ""), max_chars=settings.research_max_chars)
+                if content.startswith(("Error:", "Failed to fetch", "Failed to extract")):
+                    content = None
+            sources.append(self._source_record(result, content))
+
+        return {
+            "agent": "web_agent",
+            "response": self._build_brief(clean_query, sources, browser_info),
+            "search_results": results,
+            "sources": sources,
+            "browser_info": browser_info,
+            "tasks_created": [],
+        }
+
+    @staticmethod
+    def related_document_queries(title: str) -> list[dict[str, str]]:
         subject = re.sub(r"\s+[-|–—].*$", "", (title or "")).strip()[:160]
         if not subject:
             return []

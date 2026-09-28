@@ -63,10 +63,11 @@ class PlannerTests(unittest.TestCase):
 
     @patch("backend.agents.web_agent.search_web")
     @patch("backend.agents.web_agent.search_in_browser", return_value={"success": True})
-    def test_chrome_research_does_not_fetch_or_summarize_web_results(self, browser_search, web_search):
-        result = WebResearchAgent().handle("FastAPI deployment", launch_browser=True)
+    def test_explicit_chrome_mode_stays_browser_only(self, browser_search, web_search):
+        with patch("backend.agents.web_agent.settings", SimpleNamespace(web_search_provider="chrome")):
+            result = WebResearchAgent().handle("FastAPI deployment", launch_browser=True)
         self.assertEqual(result["search_results"], [])
-        self.assertIn("No web pages were fetched", result["response"])
+        self.assertIn("Browser-only mode", result["response"])
         browser_search.assert_called_once()
         web_search.assert_not_called()
 

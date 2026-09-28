@@ -1,97 +1,157 @@
-import os
-import json
+"""Live web-search helpers used by the personal research workflow."""
+from __future__ import annotations
+
 import logging
-from typing import List, Dict, Any, Optional
-import urllib.parse
+from typing import Any
+from urllib.parse import parse_qs, quote, unquote, urlparse
+from xml.etree import ElementTree
+
 import requests
+from bs4 import BeautifulSoup
+
 
 logger = logging.getLogger("SearchTool")
-
-# High-fidelity backup results to ensure demo NEVER fails on stage if network drops
-MOCK_SEARCH_CACHE: Dict[str, List[Dict[str, str]]] = {
-    "railway vs vercel": [
-        {
-            "title": "Railway vs Vercel: Full Comparison 2026",
-            "url": "https://railway.app/blog/railway-vs-vercel",
-            "snippet": "Vercel excels at serverless frontend hosting (Next.js, Vite), while Railway offers full-stack container deployment, persistent databases (PostgreSQL, Redis), background workers, and simple Dockerfile builds with predictable hourly pricing."
-        },
-        {
-            "title": "Choosing between Vercel and Railway for Modern Apps",
-            "url": "https://dev.to/fullstack/railway-or-vercel-best-stack-guide",
-            "snippet": "If you have long-running background tasks, WebSocket connections, or FastAPI/Python backends, Railway is significantly easier. If you are exclusively running edge/JAMstack frontend with serverless functions, Vercel gives zero-config CDN deployments."
-        },
-        {
-            "title": "Deploying Python & FastAPI: Cloud Providers Evaluated",
-            "url": "https://fastapi.tiangolo.com/deployment/providers/",
-            "snippet": "Railway, Render, and Fly.io support persistent Python processes natively. Vercel serverless has execution timeouts and cold starts that can affect stateful coordinator agents."
-        }
-    ],
-    "fastapi vs litestar": [
-        {
-            "title": "FastAPI vs Litestar: Performance & Ergonomics",
-            "url": "https://litestar.dev/compare-fastapi",
-            "snippet": "FastAPI is the industry standard with massive ecosystem support and Pydantic v2 validation. Litestar offers higher raw throughput and built-in dependency injection scopes, but smaller third-party library adoption."
-        },
-        {
-            "title": "Modern Python APIs: Benchmark Report",
-            "url": "https://testdriven.io/blog/fastapi-litestar-benchmarks",
-            "snippet": "For AI coordinator services with SQLite and async endpoints, FastAPI provides the most seamless developer experience and library integrations."
-        }
-    ]
-}
+_SEARCH_URL = "https://html.duckduckgo.com/html/"
+_USER_AGENT = "DigitalWorkspaceAgent/2.1 (+local personal research)"
 
 
-def search_web(query: str, max_results: int = 4) -> List[Dict[str, str]]:
-    """
-    Search the web for a query with graceful fallback.
-    Returns a list of dicts with title, url, snippet.
-    """
-    query_clean = query.strip()
-    query_lower = query_clean.lower()
+def _clean_text(value: str | None) -> str:
+    return " ".join((value or "").split())
 
-    # 1. Check cached demo triggers
-    for key, cached_items in MOCK_SEARCH_CACHE.items():
-        if key in query_lower or any(word in query_lower for word in key.split()):
-            logger.info("Found cached search results for query matching: %s", key)
-            return cached_items[:max_results]
 
-    # 2. Try DuckDuckGo Instant Answer / HTML Search (No API key needed)
+def _destination_url(href: str | None) -> str | None:
+    if not href:
+        return None
+    parsed = urlparse(href)
+    if not parsed.scheme and href.startswith("//"):
+        parsed = urlparse(f"https:{href}")
+    elif not parsed.scheme and href.startswith("/"):
+        parsed = urlparse(f"https://duckduckgo.com{href}")
+    if "duckduckgo.com" in (parsed.netloc or "") and parsed.path.startswith("/l/"):
+        destination = parse_qs(parsed.query).get("uddg", [None])[0]
+        if destination:
+            href = unquote(destination)
+            parsed = urlparse(href)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return parsed.geturl()
+
+
+def _result_record(title: str, url: str, snippet: str) -> dict[str, str]:
+    parsed = urlparse(url)
+    return {
+        "title": _clean_text(title)[:300] or parsed.netloc,
+        "url": url,
+        "snippet": _clean_text(snippet)[:900],
+        "domain": parsed.netloc.removeprefix("www."),
+    }
+
+
+def _html_results(html: str, maximum: int) -> list[dict[str, str]]:
+    soup = BeautifulSoup(html, "html.parser")
+    results: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for link in soup.select("a.result__a, a[data-testid='result-title-a']"):
+        url = _destination_url(link.get("href"))
+        if not url or url in seen_urls:
+            continue
+        container = link.find_parent(class_=lambda classes: classes and "result" in classes)
+        snippet_node = container.select_one(".result__snippet, [data-result='snippet']") if container else None
+        results.append(_result_record(link.get_text(" ", strip=True), url, snippet_node.get_text(" ", strip=True) if snippet_node else ""))
+        seen_urls.add(url)
+        if len(results) >= maximum:
+            return results
+    return results
+
+
+def _instant_answer_results(query: str, maximum: int) -> list[dict[str, str]]:
     try:
-        url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(query_clean)}&format=json&no_html=1&skip_disambig=1"
-        resp = requests.get(url, timeout=3.0, headers={"User-Agent": "Mozilla/5.0"})
-        if resp.status_code == 200:
-            data = resp.json()
-            results = []
-            if data.get("Abstract"):
-                results.append({
-                    "title": data.get("Heading", query_clean),
-                    "url": data.get("AbstractURL", "https://duckduckgo.com/?q=" + urllib.parse.quote(query_clean)),
-                    "snippet": data.get("Abstract")
-                })
-            for topic in data.get("RelatedTopics", []):
-                if isinstance(topic, dict) and topic.get("Text") and topic.get("FirstURL"):
-                    results.append({
-                        "title": topic.get("Text")[:60] + "...",
-                        "url": topic.get("FirstURL"),
-                        "snippet": topic.get("Text")
-                    })
-                if len(results) >= max_results:
-                    break
-            if results:
-                return results
-    except Exception as e:
-        logger.warning("Live web search fallback triggered: %s", e)
+        response = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+            timeout=6.0,
+            headers={"User-Agent": _USER_AGENT},
+        )
+        response.raise_for_status()
+        data: dict[str, Any] = response.json()
+    except (requests.RequestException, ValueError) as error:
+        logger.info("DuckDuckGo instant-answer fallback failed: %s", error)
+        return []
 
-    # 3. Dynamic generic fallback result if offline
+    results: list[dict[str, str]] = []
+    if data.get("AbstractURL"):
+        results.append(_result_record(data.get("Heading") or query, data["AbstractURL"], data.get("Abstract") or ""))
+    for topic in data.get("RelatedTopics", []):
+        if not isinstance(topic, dict):
+            continue
+        if topic.get("FirstURL") and topic.get("Text"):
+            results.append(_result_record(topic["Text"], topic["FirstURL"], topic["Text"]))
+        if len(results) >= maximum:
+            break
+    return results
+
+
+def _bing_rss_results(query: str, maximum: int) -> list[dict[str, str]]:
+    """Use Bing's RSS representation when DuckDuckGo serves a challenge page."""
+    try:
+        response = requests.get(
+            "https://www.bing.com/search",
+            params={"format": "rss", "q": query},
+            timeout=8.0,
+            headers={"User-Agent": _USER_AGENT},
+        )
+        response.raise_for_status()
+        root = ElementTree.fromstring(response.text)
+    except (requests.RequestException, ElementTree.ParseError) as error:
+        logger.info("Bing RSS search fallback failed: %s", error)
+        return []
+
+    results: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in root.findall(".//item"):
+        url = _destination_url(item.findtext("link"))
+        if not url or url in seen_urls:
+            continue
+        title = BeautifulSoup(item.findtext("title") or "", "html.parser").get_text(" ", strip=True)
+        snippet = BeautifulSoup(item.findtext("description") or "", "html.parser").get_text(" ", strip=True)
+        results.append(_result_record(title, url, snippet))
+        seen_urls.add(url)
+        if len(results) >= maximum:
+            break
+    return results
+
+
+def search_web(query: str, max_results: int = 6) -> list[dict[str, str]]:
+    """Return live, deduplicated search results with title, URL, snippet, and domain."""
+    clean_query = _clean_text(query)
+    if not clean_query:
+        return []
+    maximum = max(1, min(max_results, 10))
+    try:
+        response = requests.get(
+            _SEARCH_URL,
+            params={"q": clean_query},
+            timeout=8.0,
+            headers={"User-Agent": _USER_AGENT},
+        )
+        response.raise_for_status()
+        results = _html_results(response.text, maximum)
+        if results:
+            return results
+    except requests.RequestException as error:
+        logger.info("Live DuckDuckGo HTML search failed: %s", error)
+
+    bing_results = _bing_rss_results(clean_query, maximum)
+    if bing_results:
+        return bing_results
+
+    instant_results = _instant_answer_results(clean_query, maximum)
+    if instant_results:
+        return instant_results
     return [
-        {
-            "title": f"Search Results for '{query_clean}'",
-            "url": f"https://duckduckgo.com/?q={urllib.parse.quote(query_clean)}",
-            "snippet": f"Overview of current findings and technical documentation related to {query_clean}."
-        }
+        _result_record(
+            f"Search results for {clean_query}",
+            f"https://duckduckgo.com/?q={quote(clean_query)}",
+            "Live search could not be reached from this machine. Open the query in your browser and retry when connectivity is available.",
+        )
     ]
-
-
-if __name__ == "__main__":
-    res = search_web("railway vs vercel")
-    print(json.dumps(res, indent=2))

@@ -33,6 +33,7 @@ class CoordinatorRouter:
             "tasks_created": result.get("tasks_created", []),
             "tasks_modified": result.get("tasks_modified", []),
             "browser_info": result.get("browser_info"),
+            "research_sources": result.get("sources", []),
             "state_snapshot": state or result.get("state_snapshot"),
             "plan": plan.to_dict(),
             "confirmation_id": result.get("confirmation_id"),

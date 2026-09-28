@@ -10,6 +10,9 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, 
     if (filter === 'active') return !task.done;
     if (filter === 'completed') return task.done;
     return true;
+  }).sort((left, right) => {
+    const weight = (task) => task.done ? 2 : (task.status === 'ongoing' ? 0 : 1);
+    return weight(left) - weight(right);
   });
 
   const handleQuickAdd = async (e) => {
@@ -24,6 +27,8 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, 
   };
 
   const activeCount = tasks.filter(t => !t.done).length;
+  const ongoingCount = tasks.filter(t => !t.done && t.status === 'ongoing').length;
+  const completedCount = tasks.filter(t => t.done).length;
 
   return (
     <div className="inspector-card" style={{ flex: 1, minHeight: '340px' }}>
@@ -32,7 +37,7 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, 
           <SlidersHorizontal size={13} style={{ color: 'var(--hf-lime)' }} />
           <span>Workspace Tasks</span>
         </div>
-        <div style={{ display: 'flex', gap: '4px' }}>
+        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <button
             onClick={() => setFilter('active')}
             className="btn-hf-ghost"
@@ -58,6 +63,19 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, 
             }}
           >
             All ({tasks.length})
+          </button>
+          <button
+            onClick={() => setFilter('completed')}
+            className="btn-hf-ghost"
+            style={{
+              padding: '2px 8px',
+              fontSize: '10px',
+              backgroundColor: filter === 'completed' ? 'var(--hf-lime-badge)' : 'transparent',
+              color: filter === 'completed' ? 'var(--hf-lime)' : 'var(--hf-text-muted)',
+              borderColor: filter === 'completed' ? 'rgba(212, 255, 0, 0.4)' : 'transparent'
+            }}
+          >
+            Done ({completedCount})
           </button>
         </div>
       </div>
@@ -88,12 +106,14 @@ export function TaskPanel({ tasks, onToggleTask, onSetTaskStatus, onCreateTask, 
         </button>
       </form>
 
+      {ongoingCount > 0 && <div style={{ color: 'var(--hf-amber)', fontFamily: 'var(--font-mono)', fontSize: '10px', marginBottom: 8 }}>{ongoingCount} task{ongoingCount === 1 ? '' : 's'} in progress</div>}
+
       {/* Tasks List */}
       <div style={{ flex: 1, overflowY: 'auto', maxHeight: '340px', paddingRight: '2px' }}>
         {filteredTasks.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '36px 10px', color: 'var(--hf-text-muted)', fontSize: '11.5px' }}>
             <CheckCircle2 size={22} style={{ margin: '0 auto 8px', opacity: 0.3, color: 'var(--hf-lime)' }} />
-            No {filter} items in queue.
+            {filter === 'all' ? 'No tasks in your workspace yet.' : `No ${filter} tasks right now.`}
           </div>
         ) : (
           filteredTasks.map(task => (

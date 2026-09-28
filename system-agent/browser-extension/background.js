@@ -46,10 +46,10 @@ function extractPageContent() {
   if (!clone) return { title: document.title, url: location.href, content: "" };
   clone.querySelectorAll("script,style,noscript,iframe,svg,nav,header,footer,aside").forEach((node) => node.remove());
   const main = clone.querySelector("main,article") || clone;
-  return { title: document.title, url: location.href, content: (main.innerText || "").replace(/\s+/g, " ").trim().slice(0, 4000) };
+  return { title: document.title, url: location.href, content: (main.innerText || "").replace(/\s+/g, " ").trim().slice(0, 18000) };
 }
 function extractSelection() {
-  return { title: document.title, url: location.href, text: String(window.getSelection?.() || "").trim().slice(0, 2000) };
+  return { title: document.title, url: location.href, text: String(window.getSelection?.() || "").trim().slice(0, 12000) };
 }
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {

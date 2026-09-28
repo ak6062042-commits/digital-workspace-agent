@@ -17,6 +17,7 @@ from sqlalchemy import delete
 from backend.core.config import settings
 from backend.core.privacy import redact_sensitive_text, safe_excerpt, sanitize_workspace_url
 from backend.core.security import limit_request_size, require_api_token
+from backend.core.text_analysis import extract_keywords, key_takeaways, normalise_text, split_sentences, summarize_text
 from backend.coordinator.router import coordinator
 from backend.coordinator.scheduler import PlannerScheduler
 from backend.db.db import get_session, init_db
@@ -71,7 +72,7 @@ class BrowserOpenRequest(RequestModel):
 class BrowserSummarizeRequest(RequestModel):
     url: HttpUrl
     title: str = Field(default="Web Page", max_length=500)
-    content: str = Field(min_length=1, max_length=4000)
+    content: str = Field(min_length=1, max_length=20000)
     consent: bool = False
 
 
@@ -84,7 +85,7 @@ class NotificationIngestRequest(RequestModel):
 class WritingAnalyzeRequest(RequestModel):
     url: str | None = Field(default=None, max_length=1000)
     title: str = Field(default="Untitled", max_length=500)
-    text: str = Field(min_length=1, max_length=2000)
+    text: str = Field(min_length=1, max_length=12000)
     operation: Literal["summarize", "improve", "explain", "ideas"] = "summarize"
     consent: bool = False
 
@@ -353,24 +354,27 @@ def summarize_browser_tab(payload: BrowserSummarizeRequest):
     if not payload.consent:
         raise HTTPException(status_code=403, detail="Explicit content consent is required")
     title = safe_excerpt(payload.title, 500) or "Web Page"
-    clean_text = redact_sensitive_text(payload.content, limit=4000)
-    sentences = [part.strip() for part in clean_text.replace("\n", " ").split(".") if len(part.strip()) > 20]
-    summary = ". ".join(sentences[:2]) or f"Reviewing {title}."
+    clean_text = redact_sensitive_text(payload.content, limit=20000)
+    summary = summarize_text(clean_text, maximum_sentences=5, maximum_characters=1800)
+    takeaways = key_takeaways(clean_text, maximum=6, maximum_characters=380)
     return {
         "success": True,
         "url": sanitize_workspace_url(str(payload.url)),
         "title": title,
         "work_context": "Explicit browser-page summary",
         "summary": summary,
-        "key_takeaways": sentences[2:5] or ["No additional local takeaways were identified."],
+        "key_takeaways": takeaways or ["No additional local takeaways were identified."],
+        "keywords": extract_keywords(clean_text, maximum=8),
+        "word_count": len(clean_text.split()),
         "external_processing": False,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def _writing_suggestion(text: str, operation: str) -> str:
-    clean_text = re.sub(r"\s+", " ", text).strip()
-    sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", clean_text) if part.strip()]
+    clean_text = normalise_text(text)
+    sentences = split_sentences(clean_text, minimum_length=1)
+    keywords = extract_keywords(clean_text, maximum=5)
     if operation == "improve":
         replacements = {
             "in order to": "to",
@@ -386,29 +390,24 @@ def _writing_suggestion(text: str, operation: str) -> str:
             revised += "."
         long_sentence_count = sum(len(sentence.split()) > 28 for sentence in sentences)
         focus = "Break the longest sentence into two ideas." if long_sentence_count else "Keep one main idea in each sentence."
-        return f"Suggested local rewrite:\n{revised}\n\nImprovement note: {focus}"
+        return f"### Suggested local rewrite\n{revised}\n\n### Improvement note\n{focus}"
     if operation == "explain":
-        return f"Local explanation: the passage is primarily about {sentences[0][:180] if sentences else 'the submitted text'}."
+        focus = ", ".join(keywords[:4]) or "the submitted text"
+        return f"### Plain-language explanation\n{summarize_text(clean_text, maximum_sentences=3, maximum_characters=1100)}\n\n**Main themes:** {focus}."
     if operation == "ideas":
-        return "Local ideas: add a concrete example, state the intended outcome, and list one question the reader should be able to answer."
-    return ". ".join(sentences[:2])[:500] or "No summary could be produced from the submitted text."
-
-
-_KEYWORD_STOPWORDS = {
-    "about", "after", "again", "also", "and", "are", "because", "been", "being", "between", "could", "does", "from", "have", "into", "more", "most", "not", "only", "other", "should", "some", "such", "than", "that", "their", "there", "these", "they", "this", "those", "through", "using", "very", "what", "when", "where", "which", "with", "would", "your",
-}
+        subject = keywords[0] if keywords else "the main topic"
+        opening = sentences[0][:220] if sentences else "the submitted text"
+        return "### Working directions\n" + "\n".join([
+            f"- Turn **{opening}** into a concrete outcome or decision.",
+            f"- Add one real example, constraint, or metric for **{subject}**.",
+            "- End with a next step, owner, or question that makes the passage actionable.",
+        ])
+    return summarize_text(clean_text, maximum_sentences=6, maximum_characters=2200)
 
 
 def _writing_research_topics(text: str, title: str) -> dict[str, Any]:
     """Derive compact local search terms from explicitly submitted text only."""
-    words = re.findall(r"[A-Za-z][A-Za-z0-9+#.-]{2,}", text.lower())
-    keywords: list[str] = []
-    for word in words:
-        if word in _KEYWORD_STOPWORDS or word in keywords:
-            continue
-        keywords.append(word)
-        if len(keywords) == 5:
-            break
+    keywords = extract_keywords(text, maximum=6)
     topic = " ".join(keywords[:3])
     if not topic and title.lower() not in {"untitled", "microsoft word selection"}:
         topic = title[:120]
@@ -426,7 +425,7 @@ def _writing_research_topics(text: str, title: str) -> dict[str, Any]:
 def analyze_writing(payload: WritingAnalyzeRequest):
     if not payload.consent:
         raise HTTPException(status_code=403, detail="Writing analysis requires explicit consent")
-    redacted = redact_sensitive_text(payload.text, limit=2000)
+    redacted = redact_sensitive_text(payload.text, limit=12000)
     suggestion_text = _writing_suggestion(redacted, payload.operation)
     research_topics = _writing_research_topics(redacted, payload.title)
     with get_session() as session:

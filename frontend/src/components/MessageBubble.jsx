@@ -98,6 +98,7 @@ export function MessageBubble({ message }) {
   const tasksCreated = message.metadata?.tasks_created || [];
   const browserInfo = message.metadata?.browser_info;
   const researchSources = message.metadata?.research_sources || [];
+  const researchProvider = message.metadata?.research_provider;
 
   return (
     <div className={`bubble-row ${isUser ? 'user' : 'assistant'}`}>
@@ -177,7 +178,7 @@ export function MessageBubble({ message }) {
 
         {researchSources.length > 0 && (
           <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(96, 165, 250, 0.06)', border: '1px solid rgba(96, 165, 250, 0.24)', borderRadius: 'var(--radius-md)' }}>
-            <div style={{ fontSize: '10.5px', color: '#93c5fd', fontWeight: 700, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Research sources</div>
+            <div style={{ fontSize: '10.5px', color: '#93c5fd', fontWeight: 700, marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Research sources{researchProvider ? ` · ${researchProvider}` : ''}</div>
             <div style={{ fontSize: 10, color: 'var(--hf-text-muted)', marginBottom: 7 }}>Retrieved content can be inaccurate or malicious. Inspect the domain before opening a source.</div>
             {researchSources.slice(0, 6).map((source) => (
               <button key={source.url} onClick={() => handleOpenBrowser(source.url)} disabled={openingBrowser} className="btn-hf-ghost" title={`Open ${source.domain || source.url} in your browser`} style={{ width: '100%', padding: '7px 0', border: 'none', borderBottom: '1px solid var(--hf-border-subtle)', borderRadius: 0, textAlign: 'left', display: 'block' }}>

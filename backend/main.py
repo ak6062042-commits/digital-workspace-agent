@@ -541,6 +541,7 @@ def _public_settings():
         "retention": {"snapshots_days": settings.snapshot_retention_days, "content_days": settings.content_retention_days},
         "snapshot_dedup_seconds": settings.snapshot_dedup_seconds,
         "overview_items_limit": min(settings.overview_items_limit, 100),
+        "research": {"provider": settings.web_search_provider, "exa_configured": bool(settings.exa_api_key)},
     }
 
 

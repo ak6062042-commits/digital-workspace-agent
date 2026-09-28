@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger("SearchTool")
 _SEARCH_URL = "https://html.duckduckgo.com/html/"
+_EXA_SEARCH_URL = "https://api.exa.ai/search"
 _USER_AGENT = "DigitalWorkspaceAgent/2.1 (+local personal research)"
 
 
@@ -115,6 +116,61 @@ def _bing_rss_results(query: str, maximum: int) -> list[dict[str, str]]:
         title = BeautifulSoup(item.findtext("title") or "", "html.parser").get_text(" ", strip=True)
         snippet = BeautifulSoup(item.findtext("description") or "", "html.parser").get_text(" ", strip=True)
         results.append(_result_record(title, url, snippet))
+        seen_urls.add(url)
+        if len(results) >= maximum:
+            break
+    return results
+
+
+def search_exa(query: str, api_key: str, max_results: int = 6, max_characters: int = 6000) -> list[dict[str, str]]:
+    """Return Exa results, including its extracted text when the API supplies it."""
+    clean_query = _clean_text(query)
+    if not clean_query or not api_key:
+        return []
+    maximum = max(1, min(max_results, 10))
+    character_limit = max(500, min(max_characters, 12000))
+    try:
+        response = requests.post(
+            _EXA_SEARCH_URL,
+            json={
+                "query": clean_query,
+                "type": "auto",
+                "numResults": maximum,
+                "contents": {"text": {"maxCharacters": character_limit}},
+            },
+            timeout=12.0,
+            headers={
+                "x-api-key": api_key,
+                "Content-Type": "application/json",
+                "User-Agent": _USER_AGENT,
+            },
+        )
+        response.raise_for_status()
+        payload: dict[str, Any] = response.json()
+    except (requests.RequestException, ValueError) as error:
+        logger.info("Exa search unavailable; using local fallback: %s", error)
+        return []
+
+    raw_results = payload.get("results", [])
+    if not isinstance(raw_results, list):
+        logger.info("Exa search returned an unexpected response shape")
+        return []
+
+    results: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        url = _destination_url(str(item.get("url") or ""))
+        if not url or url in seen_urls:
+            continue
+        highlights = item.get("highlights")
+        highlight_text = " ".join(str(value) for value in highlights if isinstance(value, str)) if isinstance(highlights, list) else ""
+        content = _clean_text(str(item.get("text") or item.get("summary") or highlight_text))[:character_limit]
+        record = _result_record(str(item.get("title") or urlparse(url).netloc), url, content)
+        record["content"] = content
+        record["provider"] = "exa"
+        results.append(record)
         seen_urls.add(url)
         if len(results) >= maximum:
             break

@@ -82,6 +82,7 @@ export default function App() {
           tasks_created: result.tasks_created,
           browser_info: result.browser_info,
           research_sources: result.research_sources,
+          research_provider: result.research_provider,
           plan: result.plan,
           confirmation_id: result.confirmation_id,
         },

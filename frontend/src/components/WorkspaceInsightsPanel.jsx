@@ -32,7 +32,7 @@ export function WorkspaceInsightsPanel({ notifications, writingSuggestions, plan
         <div className="inspector-header"><div className="inspector-title"><Activity size={13} style={{ color: 'var(--hf-emerald)' }} /> Workspace status</div></div>
         <div style={{ fontSize: '11px', color: 'var(--hf-text-secondary)', lineHeight: 1.55 }}>
           Context capture: <strong style={{ color: settings?.capture_enabled ? 'var(--hf-lime)' : 'var(--hf-text-muted)' }}>{settings?.capture_enabled ? 'on' : 'off'}</strong>.<br />
-          Live research returns sources you can inspect one at a time. Writing and page analysis work from text you explicitly submit.
+          Live research uses {settings?.research?.provider === 'exa' && settings?.research?.exa_configured ? 'Exa, with DuckDuckGo fallback' : 'DuckDuckGo fallback until Exa is configured'}. Inspect sources one at a time. Writing and page analysis work from text you explicitly submit.
         </div>
       </div>
 

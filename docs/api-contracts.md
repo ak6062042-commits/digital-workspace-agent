@@ -39,7 +39,7 @@ Collection endpoints support `limit` (1-100, default 50). `/api/workspace/overvi
 
 Chat response shape includes a human response, `plan`, execution `status`, optional `confirmation_id`, task updates, browser action data, and current state. A plan contains `intent`, `category`, `action`, `arguments`, `confirmation_required`, and `expected_result`.
 
-When chat resolves to `web.research`, the default `duckduckgo` provider collects live results with a Bing RSS fallback, reads the configured leading pages, and returns a source-attributed brief plus `research_sources`. It also opens the visible desktop search when the plan requests it. Set `WEB_SEARCH_PROVIDER=chrome`, `browser`, or `manual` for a browser-only research path.
+When chat resolves to `web.research`, the default `exa` provider uses `EXA_API_KEY` to collect live results and inline extracted source text. If the key is missing or Exa fails, it automatically uses DuckDuckGo with a Bing RSS fallback. The response includes `research_provider` and `research_sources`; it also opens the visible desktop search when the plan requests it. Set `WEB_SEARCH_PROVIDER=chrome`, `browser`, or `manual` for a browser-only research path.
 
 ## Tasks
 

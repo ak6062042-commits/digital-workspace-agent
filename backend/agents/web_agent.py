@@ -10,7 +10,7 @@ from backend.core.config import settings
 from backend.core.text_analysis import key_takeaways, summarize_text
 from backend.tools.browser_tool import search_in_browser
 from backend.tools.fetch_tool import fetch_webpage_content
-from backend.tools.search_tool import search_web
+from backend.tools.search_tool import search_exa, search_web
 
 
 logger = logging.getLogger("WebResearchAgent")
@@ -51,11 +51,12 @@ class WebResearchAgent:
         safe_url = url.replace("(", "%28").replace(")", "%29")
         return f"[{safe_title}]({safe_url})"
 
-    def _build_brief(self, query: str, sources: list[dict[str, str]], browser_info: dict[str, Any] | None) -> str:
+    def _build_brief(self, query: str, sources: list[dict[str, str]], browser_info: dict[str, Any] | None, provider: str) -> str:
         lines = [f"## Research brief: {query}"]
         if browser_info and browser_info.get("success"):
             lines.append(f"I also opened a live {browser_info.get('engine', 'web')} search in your browser.")
-        lines.append(f"I found {len(sources)} source{'s' if len(sources) != 1 else ''} and read the leading result pages where they were available.")
+        lines.append(f"Research provider: **{provider}**.")
+        lines.append(f"I found {len(sources)} source{'s' if len(sources) != 1 else ''} and used source content where it was available.")
         lines.extend(["", "### Key findings"])
         for source in sources:
             link = self._markdown_link(source["title"], source["url"])
@@ -86,11 +87,26 @@ class WebResearchAgent:
             )
             return {"agent": "web_agent", "response": response, "search_results": [], "sources": [], "browser_info": browser_info, "tasks_created": []}
 
-        results = search_web(clean_query, max_results=settings.research_max_results)
+        provider = settings.web_search_provider
+        research_provider = "DuckDuckGo"
+        if provider == "exa":
+            results = search_exa(
+                clean_query,
+                api_key=getattr(settings, "exa_api_key", ""),
+                max_results=settings.research_max_results,
+                max_characters=settings.research_max_chars,
+            )
+            if results:
+                research_provider = "Exa"
+            else:
+                research_provider = "DuckDuckGo fallback"
+                results = search_web(clean_query, max_results=settings.research_max_results)
+        else:
+            results = search_web(clean_query, max_results=settings.research_max_results)
         sources: list[dict[str, str]] = []
         for index, result in enumerate(results):
-            content = None
-            if index < settings.research_fetch_results:
+            content = result.get("content") or None
+            if not content and index < settings.research_fetch_results:
                 content = fetch_webpage_content(result.get("url", ""), max_chars=settings.research_max_chars)
                 if content.startswith(("Error:", "Failed to fetch", "Failed to extract")):
                     content = None
@@ -98,9 +114,10 @@ class WebResearchAgent:
 
         return {
             "agent": "web_agent",
-            "response": self._build_brief(clean_query, sources, browser_info),
+            "response": self._build_brief(clean_query, sources, browser_info, research_provider),
             "search_results": results,
             "sources": sources,
+            "research_provider": research_provider,
             "browser_info": browser_info,
             "tasks_created": [],
         }

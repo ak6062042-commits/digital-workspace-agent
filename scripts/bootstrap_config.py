@@ -35,7 +35,7 @@ def main() -> None:
     # Live source-attributed research is the personal-workflow default.
     # Preserve an explicit browser-only preference from an existing setup.
     if not values.get("WEB_SEARCH_PROVIDER", "").strip():
-        values["WEB_SEARCH_PROVIDER"] = "duckduckgo"
+        values["WEB_SEARCH_PROVIDER"] = "exa"
     # The watcher now uses the authenticated API exclusively. Migrate the old
     # bypass default so setup does not preserve an obsolete direct-write path.
     if values.get("DIRECT_DB_FALLBACK", "").strip().lower() in {"", "true", "1", "yes"}:

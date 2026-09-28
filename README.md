@@ -12,7 +12,7 @@ The project is designed around a simple rule: observing context, suggesting work
 | Conversational control | Natural-language chat interface | The backend classifies the request, generates a typed plan, and applies policy before an execution-capable step can run. |
 | Human approval | Explicit confirmation for consequential actions | A confirmation card is returned to the client; no hidden approval is inferred. Confirmation requests are intentionally in memory and expire if the backend restarts. |
 | Task management | Create, list, update, navigate to, and link tasks to the current workspace | Tasks support pending, ongoing, and done states plus sanitized source context. |
-| Research assistance | Live web research with source-linked briefs | By default, a research request searches DuckDuckGo with Bing RSS fallback, reads leading result pages, opens a visible desktop search, and returns a concise cited brief. |
+| Research assistance | Live web research with source-linked briefs | With `EXA_API_KEY` configured, a research request uses Exa's live search and inline source text; otherwise it falls back to DuckDuckGo with Bing RSS fallback. It opens a visible desktop search and returns a concise cited brief. |
 | Writing support | Summarize, improve, explain, and brainstorm from supplied text | Handles drafts, notes, selected text, and browser pages up to practical working lengths, then returns local analysis plus relevant research queries. |
 | Browser companion | Chrome extension for active-tab context, page summaries, and selected-text analysis | Active-tab sync is opt-in. Page/selection content is injected only after a direct popup action. |
 | Word integration | Local Microsoft Word task pane | Reads selected document text only after the person presses an analysis button. |
@@ -168,7 +168,7 @@ Task records use forward-compatible database migration handling and sanitized UR
 
 Research is deliberately user-visible and user-triggered.
 
-- The default provider is `duckduckgo`. A research request performs a live DuckDuckGo search with a Bing RSS fallback, reads up to the configured number of leading result pages, and returns a source-attributed brief directly in chat.
+- The default provider is `exa`. Add `EXA_API_KEY` to `.env` to use Exa's live search and inline extracted text for source-attributed briefs. If the key is blank, invalid, or the Exa request fails, research automatically continues with DuckDuckGo and its Bing RSS fallback.
 - The dashboard keeps both the visible desktop search and clickable source cards, so you can continue reading any source in the browser.
 - Source cards show the title, domain, and extractive snippet before opening. Retrieved pages are treated as untrusted; automated retrieval rejects credential-bearing, local, private, and redirect-to-private targets.
 - Set `WEB_SEARCH_PROVIDER=chrome` when you specifically want browser-only manual research with no retrieval or summary in the assistant.
@@ -383,7 +383,8 @@ Copy `.env.example` to `.env`; do not commit the resulting file. The template co
 | `LLM_PROVIDER` | `none` | Configured external provider, if explicitly enabled. |
 | `LLM_MODEL` | blank | Model identifier for an explicitly enabled provider. |
 | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` | blank | Optional provider credentials; leave blank for local-only operation. |
-| `WEB_SEARCH_PROVIDER` | `duckduckgo` | Live web research default. Set `chrome`, `browser`, or `manual` to keep research browser-only. |
+| `EXA_API_KEY` | blank | API key from Exa. It is used only by the backend and never returned by the settings endpoint. |
+| `WEB_SEARCH_PROVIDER` | `exa` | Live web research default. Exa automatically falls back to DuckDuckGo if unavailable. Set `chrome`, `browser`, or `manual` to keep research browser-only. |
 | `RESEARCH_MAX_RESULTS` | `6` | Maximum live search results collected for one research request. |
 | `RESEARCH_FETCH_RESULTS` | `4` | Number of leading result pages read for a research brief. |
 | `RESEARCH_MAX_CHARS` | `6000` | Maximum extracted text read from each result page. |
